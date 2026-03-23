@@ -69,11 +69,17 @@ fi
 "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt" -q 2>/dev/null
 echo "  Done."
 
-# ── Generate secret key if not exists ──
+# ── Generate secret key + admin password if needed ──
 if [ ! -f "$AISSH_DIR/.env" ]; then
   SECRET=$("$VENV_DIR/bin/python3" -c "import secrets; print(secrets.token_hex(24))")
   echo "FLASK_SECRET_KEY=$SECRET" > "$AISSH_DIR/.env"
   echo "  Generated secret key."
+fi
+# Generate admin password if no users.json exists
+GENERATED_PW=""
+if [ ! -f "$AISSH_DIR/users.json" ] || [ "$RESET_ADMIN" = true ]; then
+  GENERATED_PW=$("$VENV_DIR/bin/python3" -c "import secrets; print(secrets.token_urlsafe(12))")
+  echo "AISSH_ADMIN_PASSWORD=$GENERATED_PW" >> "$AISSH_DIR/.env"
 fi
 
 # ── Reset admin if requested ──
@@ -189,15 +195,16 @@ fi
 
 # ── Show admin password ──
 echo ""
-PW=$(journalctl -u aissh --no-pager 2>/dev/null | grep "Password:" | tail -1 | awk '{print $NF}')
-if [ -n "$PW" ]; then
+if [ -n "$GENERATED_PW" ]; then
   echo "  ╔═══════════════════════════════════════╗"
   echo "  ║  Admin Login                          ║"
   echo "  ║  Username: admin                      ║"
-  printf "  ║  Password: %-26s ║\n" "$PW"
+  printf "  ║  Password: %-26s ║\n" "$GENERATED_PW"
   echo "  ║                                       ║"
   echo "  ║  Change this in Settings immediately! ║"
   echo "  ╚═══════════════════════════════════════╝"
+  # Remove the temp password from .env (app already used it)
+  sed -i '/AISSH_ADMIN_PASSWORD/d' "$AISSH_DIR/.env" 2>/dev/null
 fi
 
 # ── Get server IP ──
