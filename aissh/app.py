@@ -1482,8 +1482,25 @@ def ws_ai_terminal(ws, name):
             if isinstance(data, str) and data.startswith("RESIZE:"):
                 try:
                     _, cols, rows = data.split(":")
-                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
+                    c, r = int(cols), int(rows)
+                    # Resize the PTY
+                    winsize = struct.pack("HHHH", r, c, 0, 0)
                     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                    # Also tell tmux to resize its window
+                    subprocess.run(
+                        [
+                            "tmux",
+                            "resize-window",
+                            "-t",
+                            session,
+                            "-x",
+                            str(c),
+                            "-y",
+                            str(r),
+                        ],
+                        capture_output=True,
+                        timeout=2,
+                    )
                 except Exception:
                     pass
             else:
@@ -1505,114 +1522,6 @@ def ws_ai_terminal(ws, name):
         # DON'T kill proc or tmux session -- let it persist for reconnection
         try:
             proc.wait(timeout=1)
-        except Exception:
-            pass
-
-    # Spawn PTY at the correct size from the start
-    master_fd, slave_fd = _pty.openpty()
-    winsize = struct.pack("HHHH", init_rows, init_cols, 0, 0)
-    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
-
-    proc = subprocess.Popen(
-        [ai_cli],
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=slave_fd,
-        env=env,
-        cwd=work_dir,
-        preexec_fn=os.setsid,
-    )
-    os.close(slave_fd)
-
-    stop = threading.Event()
-
-    if FileObject:
-        fobj = FileObject(master_fd, "rb", close=False)
-
-        def _pty_to_ws():
-            while not stop.is_set():
-                try:
-                    chunk = fobj.read1(4096)
-                    if not chunk:
-                        break
-                    ws.send(chunk.decode(errors="replace"))
-                except Exception:
-                    break
-            stop.set()
-            try:
-                ws.close()
-            except Exception:
-                pass
-
-        g = gevent.spawn(_pty_to_ws)
-    else:
-
-        def _pty_to_ws():
-            os.set_blocking(master_fd, False)
-            while not stop.is_set():
-                try:
-                    data = os.read(master_fd, 4096)
-                    if not data:
-                        break
-                    ws.send(data.decode(errors="replace"))
-                except BlockingIOError:
-                    _time.sleep(0.02)
-                except OSError:
-                    break
-            stop.set()
-            try:
-                ws.close()
-            except Exception:
-                pass
-
-        g = threading.Thread(target=_pty_to_ws, daemon=True)
-        g.start()
-
-    try:
-        while not stop.is_set():
-            data = ws.receive()
-            if data is None:
-                break
-            if isinstance(data, str) and data.startswith("RESIZE:"):
-                try:
-                    _, cols, rows = data.split(":")
-                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
-                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                    # Signal opencode to redraw
-                    import signal
-
-                    try:
-                        os.kill(proc.pid, signal.SIGWINCH)
-                    except OSError:
-                        pass
-                except Exception:
-                    pass
-            else:
-                raw = data if isinstance(data, bytes) else data.encode()
-                try:
-                    os.write(master_fd, raw)
-                except OSError:
-                    break
-    except Exception:
-        pass
-    finally:
-        stop.set()
-        if FileObject and hasattr(g, "kill"):
-            g.kill()
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-        try:
-            shutil.rmtree(work_dir, ignore_errors=True)
         except Exception:
             pass
 
