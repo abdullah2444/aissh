@@ -14,6 +14,14 @@ echo "  ║            Installer                  ║"
 echo "  ╚═══════════════════════════════════════╝"
 echo ""
 
+# ── Parse flags ──
+RESET_ADMIN=false
+for arg in "$@"; do
+  case "$arg" in
+    --reset) RESET_ADMIN=true ;;
+  esac
+done
+
 # ── Check root ──
 if [ "$(id -u)" -ne 0 ]; then
   echo "[!] Run as root: sudo bash install.sh"
@@ -66,6 +74,12 @@ if [ ! -f "$AISSH_DIR/.env" ]; then
   SECRET=$("$VENV_DIR/bin/python3" -c "import secrets; print(secrets.token_hex(24))")
   echo "FLASK_SECRET_KEY=$SECRET" > "$AISSH_DIR/.env"
   echo "  Generated secret key."
+fi
+
+# ── Reset admin if requested ──
+if [ "$RESET_ADMIN" = true ]; then
+  echo "  Resetting admin account..."
+  rm -f "$AISSH_DIR/users.json"
 fi
 
 # ── Install systemd service ──
