@@ -662,7 +662,7 @@ def save_deepseek_key(uid: str, key: str):
 
 
 def get_provider(uid: str) -> str:
-    return _load_user_settings(uid).get("ai_provider", "claude")
+    return _load_user_settings(uid).get("ai_provider", "anthropic")
 
 
 def save_provider(uid: str, p: str):
@@ -671,16 +671,154 @@ def save_provider(uid: str, p: str):
     _save_user_settings(uid, s)
 
 
-# Model choices (Claude CLI aliases + DeepSeek via Anthropic-compatible API)
-MODEL_OPTIONS = [
-    {"id": "haiku", "label": "Haiku 4.5", "provider": "claude"},
-    {"id": "sonnet", "label": "Sonnet 4.6", "provider": "claude"},
-    {"id": "opus", "label": "Opus 4.6", "provider": "claude"},
-    {"id": "deepseek-chat", "label": "DeepSeek V3", "provider": "deepseek"},
-]
+def get_provider_key(uid: str, provider_id: str) -> str:
+    """Get the API key for any provider."""
+    prov = AI_PROVIDERS.get(provider_id)
+    if not prov:
+        return ""
+    return _load_user_settings(uid).get(prov["key_setting"], "")
 
-DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic"
-DEFAULT_MODEL = "sonnet"
+
+def save_provider_key(uid: str, provider_id: str, key: str):
+    """Save the API key for any provider."""
+    prov = AI_PROVIDERS.get(provider_id)
+    if not prov:
+        return
+    s = _load_user_settings(uid)
+    s[prov["key_setting"]] = key
+    _save_user_settings(uid, s)
+
+
+def get_custom_base_url(uid: str) -> str:
+    return _load_user_settings(uid).get("custom_base_url", "")
+
+
+def save_custom_base_url(uid: str, url: str):
+    s = _load_user_settings(uid)
+    s["custom_base_url"] = url
+    _save_user_settings(uid, s)
+
+
+def get_custom_model(uid: str) -> str:
+    return _load_user_settings(uid).get("custom_model_name", "")
+
+
+def save_custom_model(uid: str, model: str):
+    s = _load_user_settings(uid)
+    s["custom_model_name"] = model
+    _save_user_settings(uid, s)
+
+
+# ---------------------------------------------------------------------------
+# AI Provider Registry
+# ---------------------------------------------------------------------------
+# Each provider uses either the Anthropic SDK or the OpenAI-compatible SDK.
+# format: "anthropic" = uses anthropic SDK, "openai" = uses openai-compatible SDK
+
+AI_PROVIDERS = {
+    "anthropic": {
+        "label": "Anthropic (Claude)",
+        "format": "anthropic",
+        "base_url": None,
+        "key_setting": "anthropic_api_key",
+        "placeholder": "sk-ant-...",
+        "models": [
+            {"id": "claude-haiku-4-5-20250315", "label": "Claude Haiku 4.5"},
+            {"id": "claude-sonnet-4-6-20250514", "label": "Claude Sonnet 4.6"},
+            {"id": "claude-opus-4-6-20250514", "label": "Claude Opus 4.6"},
+        ],
+    },
+    "openai": {
+        "label": "OpenAI",
+        "format": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "key_setting": "openai_api_key",
+        "placeholder": "sk-...",
+        "models": [
+            {"id": "gpt-4o", "label": "GPT-4o"},
+            {"id": "gpt-4o-mini", "label": "GPT-4o Mini"},
+            {"id": "gpt-4.1", "label": "GPT-4.1"},
+            {"id": "gpt-4.1-mini", "label": "GPT-4.1 Mini"},
+            {"id": "o3-mini", "label": "o3-mini"},
+        ],
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "format": "openai",
+        "base_url": "https://api.deepseek.com/v1",
+        "key_setting": "deepseek_api_key",
+        "placeholder": "sk-...",
+        "models": [
+            {"id": "deepseek-chat", "label": "DeepSeek V3"},
+            {"id": "deepseek-reasoner", "label": "DeepSeek R1"},
+        ],
+    },
+    "kimi": {
+        "label": "Kimi (Moonshot)",
+        "format": "openai",
+        "base_url": "https://api.moonshot.cn/v1",
+        "key_setting": "kimi_api_key",
+        "placeholder": "sk-...",
+        "models": [
+            {"id": "moonshot-v1-auto", "label": "Kimi Auto"},
+            {"id": "moonshot-v1-8k", "label": "Kimi 8K"},
+            {"id": "moonshot-v1-32k", "label": "Kimi 32K"},
+        ],
+    },
+    "minimax": {
+        "label": "MiniMax",
+        "format": "openai",
+        "base_url": "https://api.minimax.chat/v1",
+        "key_setting": "minimax_api_key",
+        "placeholder": "eyJ...",
+        "models": [
+            {"id": "MiniMax-Text-01", "label": "MiniMax Text 01"},
+            {"id": "abab6.5s-chat", "label": "ABAB 6.5s"},
+        ],
+    },
+    "groq": {
+        "label": "Groq",
+        "format": "openai",
+        "base_url": "https://api.groq.com/openai/v1",
+        "key_setting": "groq_api_key",
+        "placeholder": "gsk_...",
+        "models": [
+            {"id": "llama-3.3-70b-versatile", "label": "Llama 3.3 70B"},
+            {"id": "llama-3.1-8b-instant", "label": "Llama 3.1 8B"},
+            {"id": "mixtral-8x7b-32768", "label": "Mixtral 8x7B"},
+        ],
+    },
+    "custom": {
+        "label": "Custom (OpenAI-compatible)",
+        "format": "openai",
+        "base_url": None,  # user provides
+        "key_setting": "custom_api_key",
+        "placeholder": "your-api-key",
+        "models": [],  # user provides model name
+    },
+}
+
+DEFAULT_MODEL = "claude-sonnet-4-6-20250514"
+DEFAULT_PROVIDER = "anthropic"
+
+
+# Flat list for settings UI
+def _build_model_options():
+    opts = []
+    for pid, prov in AI_PROVIDERS.items():
+        for m in prov["models"]:
+            opts.append(
+                {
+                    "id": f"{pid}:{m['id']}",
+                    "label": f"{m['label']}",
+                    "provider": pid,
+                    "provider_label": prov["label"],
+                }
+            )
+    return opts
+
+
+MODEL_OPTIONS = _build_model_options()
 
 
 def get_model(uid: str) -> str:
@@ -1030,6 +1168,90 @@ def ws_terminal(ws, name):
 
     channel = client.invoke_shell(term="xterm-256color", width=220, height=50)
     channel.setblocking(False)
+    stop = threading.Event()
+
+    def _ssh_to_ws():
+        while not stop.is_set():
+            try:
+                if channel.recv_ready():
+                    data = channel.recv(4096)
+                    if not data:
+                        break
+                    ws.send(data.decode(errors="replace"))
+                elif channel.exit_status_ready():
+                    break
+                else:
+                    _time.sleep(0.01)
+            except Exception:
+                break
+        stop.set()
+        try:
+            ws.close()
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_ssh_to_ws, daemon=True)
+    t.start()
+
+    try:
+        while not stop.is_set():
+            data = ws.receive()
+            if data is None:
+                break
+            if isinstance(data, str) and data.startswith("RESIZE:"):
+                try:
+                    _, cols, rows = data.split(":")
+                    channel.resize_pty(width=int(cols), height=int(rows))
+                except Exception:
+                    pass
+            else:
+                channel.send(data if isinstance(data, bytes) else data.encode())
+    except Exception:
+        pass
+    finally:
+        stop.set()
+        try:
+            channel.close()
+        except Exception:
+            pass
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+@sock.route("/ws/ai-terminal/<name>")
+def ws_ai_terminal(ws, name):
+    """WebSocket terminal that launches opencode CLI on the remote server."""
+    if not current_user.is_authenticated:
+        ws.close()
+        return
+    uid = current_user.id
+    server = get_server(uid, name)
+    if not server:
+        ws.send("\r\n\x1b[31mServer not found.\x1b[0m\r\n")
+        return
+
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        _ssh_connect(client, server, timeout=10)
+    except Exception as e:
+        ws.send(f"\r\n\x1b[31mSSH connection failed: {e}\x1b[0m\r\n")
+        return
+
+    channel = client.invoke_shell(term="xterm-256color", width=120, height=40)
+    channel.setblocking(False)
+
+    # Launch opencode (or claude as fallback) after shell is ready
+    _time.sleep(0.3)
+    channel.send(
+        "command -v opencode >/dev/null 2>&1 && exec opencode || "
+        "(command -v claude >/dev/null 2>&1 && exec claude || "
+        "echo -e '\\033[31mNeither opencode nor claude CLI is installed.\\033[0m\\n"
+        "Install: npm install -g @anthropic/opencode  OR  npm install -g @anthropic-ai/claude-code')\r"
+    )
+
     stop = threading.Event()
 
     def _ssh_to_ws():
@@ -2364,178 +2586,6 @@ def delete_snapshot(name, ts):
 
 
 _pending_uploads: dict = {}  # upload_id → attachment dict
-
-# ---------------------------------------------------------------------------
-# AI Chat (side panel)
-# ---------------------------------------------------------------------------
-
-_MODEL_MAP = {
-    "haiku": "claude-haiku-4-5-20250315",
-    "sonnet": "claude-sonnet-4-6-20250514",
-    "opus": "claude-opus-4-6-20250514",
-    "deepseek-chat": "deepseek-chat",
-    "": "claude-sonnet-4-6-20250514",
-}
-
-_chat_histories: dict = {}  # (uid, server_name) -> list of messages
-
-
-@app.route("/servers/<name>/chat", methods=["POST"])
-@login_required
-def ai_chat(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-
-    data = request.get_json() or {}
-    message = data.get("message", "").strip()
-    if not message:
-        return jsonify({"error": "Empty message"}), 400
-
-    api_key = get_api_key(uid)
-    ds_key = get_deepseek_key(uid)
-    model_id = get_model(uid) or "sonnet"
-    model_info = next(
-        (m for m in MODEL_OPTIONS if m["id"] == model_id), MODEL_OPTIONS[1]
-    )
-    is_deepseek = model_info["provider"] == "deepseek"
-
-    if is_deepseek and not ds_key:
-        return jsonify({"error": "No DeepSeek API key. Go to Settings."}), 400
-    if not is_deepseek and not api_key:
-        return jsonify({"error": "No Anthropic API key. Go to Settings."}), 400
-
-    # Get or create chat history for this server
-    history_key = (uid, name)
-    if history_key not in _chat_histories:
-        _chat_histories[history_key] = []
-    history = _chat_histories[history_key]
-
-    # System prompt
-    system_prompt = (
-        f"You are a Linux server assistant. The user is managing server '{name}' "
-        f"({server['user']}@{server['host']}:{server.get('port', 22)}).\n\n"
-        f"You can run commands on this server. When you need to execute a command, "
-        f"use the run_command tool. Be concise. Use markdown for formatting."
-    )
-
-    # Add user message
-    history.append({"role": "user", "content": message})
-
-    # Keep history manageable (last 20 messages)
-    if len(history) > 20:
-        history[:] = history[-20:]
-
-    tools = [
-        {
-            "name": "run_command",
-            "description": "Execute a shell command on the server via SSH. Returns stdout, stderr, and exit code.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The shell command to execute",
-                    }
-                },
-                "required": ["command"],
-            },
-        }
-    ]
-
-    def generate():
-        import anthropic
-
-        try:
-            if is_deepseek:
-                client = anthropic.Anthropic(
-                    api_key=ds_key,
-                    base_url=DEEPSEEK_BASE_URL,
-                )
-            else:
-                client = anthropic.Anthropic(api_key=api_key)
-
-            model_name = _MODEL_MAP.get(model_id, "claude-sonnet-4-6-20250514")
-            messages = list(history)
-            max_rounds = 5  # prevent infinite tool loops
-
-            for _ in range(max_rounds):
-                kwargs = {
-                    "model": model_name,
-                    "max_tokens": 4096,
-                    "system": system_prompt,
-                    "messages": messages,
-                }
-                # Only add tools for non-deepseek (deepseek doesn't support tools well)
-                if not is_deepseek:
-                    kwargs["tools"] = tools
-
-                response = client.messages.create(**kwargs)
-
-                # Collect text and tool use blocks
-                text_parts = []
-                tool_uses = []
-                for block in response.content:
-                    if block.type == "text":
-                        text_parts.append(block.text)
-                    elif block.type == "tool_use":
-                        tool_uses.append(block)
-
-                # Stream text
-                if text_parts:
-                    yield f"data: {json.dumps({'type': 'text', 'content': ''.join(text_parts)})}\n\n"
-
-                # If no tool calls, we're done
-                if not tool_uses or response.stop_reason != "tool_use":
-                    # Save assistant response to history
-                    history.append({"role": "assistant", "content": response.content})
-                    break
-
-                # Execute tool calls
-                history.append({"role": "assistant", "content": response.content})
-                tool_results = []
-                for tool in tool_uses:
-                    if tool.name == "run_command":
-                        cmd = tool.input.get("command", "")
-                        yield f"data: {json.dumps({'type': 'command', 'command': cmd})}\n\n"
-                        result = _ssh_exec(uid, server, cmd, timeout=30)
-                        output = result["stdout"]
-                        if result["stderr"]:
-                            output += "\n[stderr] " + result["stderr"]
-                        if result["exit_code"] != 0:
-                            output += f"\n[exit code: {result['exit_code']}]"
-                        output = output or "(no output)"
-                        yield f"data: {json.dumps({'type': 'output', 'output': output[:3000]})}\n\n"
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tool.id,
-                                "content": output[:8000],
-                            }
-                        )
-
-                messages = list(history) + [{"role": "user", "content": tool_results}]
-
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@app.route("/servers/<name>/chat/clear", methods=["POST"])
-@login_required
-def ai_chat_clear(name):
-    uid = current_user.id
-    key = (uid, name)
-    _chat_histories.pop(key, None)
-    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------
