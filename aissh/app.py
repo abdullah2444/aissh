@@ -2366,6 +2366,179 @@ def delete_snapshot(name, ts):
 _pending_uploads: dict = {}  # upload_id → attachment dict
 
 # ---------------------------------------------------------------------------
+# AI Chat (side panel)
+# ---------------------------------------------------------------------------
+
+_MODEL_MAP = {
+    "haiku": "claude-haiku-4-5-20250315",
+    "sonnet": "claude-sonnet-4-6-20250514",
+    "opus": "claude-opus-4-6-20250514",
+    "deepseek-chat": "deepseek-chat",
+    "": "claude-sonnet-4-6-20250514",
+}
+
+_chat_histories: dict = {}  # (uid, server_name) -> list of messages
+
+
+@app.route("/servers/<name>/chat", methods=["POST"])
+@login_required
+def ai_chat(name):
+    uid = current_user.id
+    server = get_server(uid, name)
+    if not server:
+        return jsonify({"error": "Server not found"}), 404
+
+    data = request.get_json() or {}
+    message = data.get("message", "").strip()
+    if not message:
+        return jsonify({"error": "Empty message"}), 400
+
+    api_key = get_api_key(uid)
+    ds_key = get_deepseek_key(uid)
+    model_id = get_model(uid) or "sonnet"
+    model_info = next(
+        (m for m in MODEL_OPTIONS if m["id"] == model_id), MODEL_OPTIONS[1]
+    )
+    is_deepseek = model_info["provider"] == "deepseek"
+
+    if is_deepseek and not ds_key:
+        return jsonify({"error": "No DeepSeek API key. Go to Settings."}), 400
+    if not is_deepseek and not api_key:
+        return jsonify({"error": "No Anthropic API key. Go to Settings."}), 400
+
+    # Get or create chat history for this server
+    history_key = (uid, name)
+    if history_key not in _chat_histories:
+        _chat_histories[history_key] = []
+    history = _chat_histories[history_key]
+
+    # System prompt
+    system_prompt = (
+        f"You are a Linux server assistant. The user is managing server '{name}' "
+        f"({server['user']}@{server['host']}:{server.get('port', 22)}).\n\n"
+        f"You can run commands on this server. When you need to execute a command, "
+        f"use the run_command tool. Be concise. Use markdown for formatting."
+    )
+
+    # Add user message
+    history.append({"role": "user", "content": message})
+
+    # Keep history manageable (last 20 messages)
+    if len(history) > 20:
+        history[:] = history[-20:]
+
+    tools = [
+        {
+            "name": "run_command",
+            "description": "Execute a shell command on the server via SSH. Returns stdout, stderr, and exit code.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute",
+                    }
+                },
+                "required": ["command"],
+            },
+        }
+    ]
+
+    def generate():
+        import anthropic
+
+        try:
+            if is_deepseek:
+                client = anthropic.Anthropic(
+                    api_key=ds_key,
+                    base_url=DEEPSEEK_BASE_URL,
+                )
+            else:
+                client = anthropic.Anthropic(api_key=api_key)
+
+            model_name = _MODEL_MAP.get(model_id, "claude-sonnet-4-6-20250514")
+            messages = list(history)
+            max_rounds = 5  # prevent infinite tool loops
+
+            for _ in range(max_rounds):
+                kwargs = {
+                    "model": model_name,
+                    "max_tokens": 4096,
+                    "system": system_prompt,
+                    "messages": messages,
+                }
+                # Only add tools for non-deepseek (deepseek doesn't support tools well)
+                if not is_deepseek:
+                    kwargs["tools"] = tools
+
+                response = client.messages.create(**kwargs)
+
+                # Collect text and tool use blocks
+                text_parts = []
+                tool_uses = []
+                for block in response.content:
+                    if block.type == "text":
+                        text_parts.append(block.text)
+                    elif block.type == "tool_use":
+                        tool_uses.append(block)
+
+                # Stream text
+                if text_parts:
+                    yield f"data: {json.dumps({'type': 'text', 'content': ''.join(text_parts)})}\n\n"
+
+                # If no tool calls, we're done
+                if not tool_uses or response.stop_reason != "tool_use":
+                    # Save assistant response to history
+                    history.append({"role": "assistant", "content": response.content})
+                    break
+
+                # Execute tool calls
+                history.append({"role": "assistant", "content": response.content})
+                tool_results = []
+                for tool in tool_uses:
+                    if tool.name == "run_command":
+                        cmd = tool.input.get("command", "")
+                        yield f"data: {json.dumps({'type': 'command', 'command': cmd})}\n\n"
+                        result = _ssh_exec(uid, server, cmd, timeout=30)
+                        output = result["stdout"]
+                        if result["stderr"]:
+                            output += "\n[stderr] " + result["stderr"]
+                        if result["exit_code"] != 0:
+                            output += f"\n[exit code: {result['exit_code']}]"
+                        output = output or "(no output)"
+                        yield f"data: {json.dumps({'type': 'output', 'output': output[:3000]})}\n\n"
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tool.id,
+                                "content": output[:8000],
+                            }
+                        )
+
+                messages = list(history) + [{"role": "user", "content": tool_results}]
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/servers/<name>/chat/clear", methods=["POST"])
+@login_required
+def ai_chat_clear(name):
+    uid = current_user.id
+    key = (uid, name)
+    _chat_histories.pop(key, None)
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
 # Migration
 # ---------------------------------------------------------------------------
 
