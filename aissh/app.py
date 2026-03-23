@@ -1239,32 +1239,23 @@ def _find_ai_cli() -> str | None:
     return None
 
 
-@sock.route("/ws/ai-terminal/<name>")
-def ws_ai_terminal(ws, name):
-    """WebSocket terminal that runs opencode/claude CLI in a local PTY."""
-    if not current_user.is_authenticated:
-        ws.close()
-        return
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        ws.send("\r\n\x1b[31mServer not found.\x1b[0m\r\n")
-        return
+def _ensure_ai_session(uid, name, server, ai_cli):
+    """Ensure a tmux session with opencode exists for this user+server. Returns session name."""
+    safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+    session = f"aissh_ai_{uid}_{safe_name}"
 
-    ai_cli = _find_ai_cli()
-    if not ai_cli:
-        ws.send(
-            "\r\n\x1b[31mNo AI CLI found on this server.\x1b[0m\r\n"
-            "\r\n  Install OpenCode:  curl -fsSL https://opencode.ai/install | bash\r\n"
-            "  Install Claude:    npm install -g @anthropic-ai/claude-code\r\n"
-        )
-        return
+    # Check if session already exists
+    check = subprocess.run(
+        ["tmux", "has-session", "-t", session],
+        capture_output=True,
+        timeout=3,
+    )
+    if check.returncode == 0:
+        return session  # already running
 
-    import pty as _pty
-    import fcntl
-    import termios
-    import struct
-    import tempfile
+    # Create working directory with CLAUDE.md context
+    work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session)
+    os.makedirs(work_dir, exist_ok=True)
 
     host = server["host"]
     port = server.get("port", 22)
@@ -1272,16 +1263,11 @@ def ws_ai_terminal(ws, name):
     password = server.get("password", "")
     pem = server.get("pem_key", "")
 
-    # Create a temp working directory with a CLAUDE.md that gives context
-    work_dir = tempfile.mkdtemp(prefix=f"aissh_{name.replace(' ', '_')}_")
-
-    # Build SSH command the AI should use
     ssh_cmd = f"sshpass -p '{password}' ssh -o StrictHostKeyChecking=no"
     if port != 22:
         ssh_cmd += f" -p {port}"
     ssh_cmd += f" {user}@{host}"
     if pem:
-        # Write temp key file
         key_path = os.path.join(work_dir, ".ssh_key")
         with open(key_path, "w") as f:
             f.write(pem)
@@ -1350,11 +1336,61 @@ Examples:
     with open(os.path.join(work_dir, "CLAUDE.md"), "w") as f:
         f.write(claude_md)
 
-    env = os.environ.copy()
+    # Build env
     cli_dir = os.path.dirname(ai_cli)
-    env["PATH"] = cli_dir + ":" + env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
-    env["TERM"] = "xterm-256color"
-    env["HOME"] = os.path.expanduser("~")
+    path_env = cli_dir + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+
+    # Create tmux session running opencode in the work directory
+    subprocess.run(
+        [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            session,
+            "-c",
+            work_dir,
+            "-x",
+            "120",
+            "-y",
+            "40",
+            f"export PATH={path_env} && {ai_cli}",
+        ],
+        env={**os.environ, "PATH": path_env, "TERM": "xterm-256color"},
+        timeout=5,
+    )
+    return session
+
+
+@sock.route("/ws/ai-terminal/<name>")
+def ws_ai_terminal(ws, name):
+    """WebSocket terminal that attaches to a persistent tmux session running opencode."""
+    if not current_user.is_authenticated:
+        ws.close()
+        return
+    uid = current_user.id
+    server = get_server(uid, name)
+    if not server:
+        ws.send("\r\n\x1b[31mServer not found.\x1b[0m\r\n")
+        return
+
+    ai_cli = _find_ai_cli()
+    if not ai_cli:
+        ws.send(
+            "\r\n\x1b[31mNo AI CLI found on this server.\x1b[0m\r\n"
+            "\r\n  Install OpenCode:  curl -fsSL https://opencode.ai/install | bash\r\n"
+            "  Install Claude:    npm install -g @anthropic-ai/claude-code\r\n"
+        )
+        return
+
+    if not shutil.which("tmux"):
+        ws.send("\r\n\x1b[31mtmux is not installed. Run: apt install tmux\x1b[0m\r\n")
+        return
+
+    import pty as _pty
+    import fcntl
+    import termios
+    import struct
 
     try:
         from gevent.fileobject import FileObject
@@ -1362,7 +1398,7 @@ Examples:
     except ImportError:
         FileObject = None
 
-    # Wait for the first RESIZE from the frontend so we know the actual panel size
+    # Wait for initial size from frontend
     init_cols, init_rows = 120, 40
     try:
         first_msg = ws.receive(timeout=5)
@@ -1371,6 +1407,106 @@ Examples:
             init_cols, init_rows = int(c), int(r)
     except Exception:
         pass
+
+    # Ensure tmux session exists (creates if needed, reuses if exists)
+    try:
+        session = _ensure_ai_session(uid, name, server, ai_cli)
+    except Exception as e:
+        ws.send(f"\r\n\x1b[31mFailed to create AI session: {e}\x1b[0m\r\n")
+        return
+
+    # Attach to tmux session via PTY
+    master_fd, slave_fd = _pty.openpty()
+    winsize = struct.pack("HHHH", init_rows, init_cols, 0, 0)
+    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+    proc = subprocess.Popen(
+        ["tmux", "attach-session", "-t", session],
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        env={**os.environ, "TERM": "xterm-256color"},
+        preexec_fn=os.setsid,
+    )
+    os.close(slave_fd)
+
+    stop = threading.Event()
+
+    if FileObject:
+        fobj = FileObject(master_fd, "rb", close=False)
+
+        def _pty_to_ws():
+            while not stop.is_set():
+                try:
+                    chunk = fobj.read1(4096)
+                    if not chunk:
+                        break
+                    ws.send(chunk.decode(errors="replace"))
+                except Exception:
+                    break
+            stop.set()
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+        g = gevent.spawn(_pty_to_ws)
+    else:
+
+        def _pty_to_ws():
+            os.set_blocking(master_fd, False)
+            while not stop.is_set():
+                try:
+                    data = os.read(master_fd, 4096)
+                    if not data:
+                        break
+                    ws.send(data.decode(errors="replace"))
+                except BlockingIOError:
+                    _time.sleep(0.02)
+                except OSError:
+                    break
+            stop.set()
+            try:
+                ws.close()
+            except Exception:
+                pass
+
+        g = threading.Thread(target=_pty_to_ws, daemon=True)
+        g.start()
+
+    try:
+        while not stop.is_set():
+            data = ws.receive()
+            if data is None:
+                break
+            if isinstance(data, str) and data.startswith("RESIZE:"):
+                try:
+                    _, cols, rows = data.split(":")
+                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
+                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                except Exception:
+                    pass
+            else:
+                raw = data if isinstance(data, bytes) else data.encode()
+                try:
+                    os.write(master_fd, raw)
+                except OSError:
+                    break
+    except Exception:
+        pass
+    finally:
+        stop.set()
+        if FileObject and hasattr(g, "kill"):
+            g.kill()
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+        # DON'T kill proc or tmux session -- let it persist for reconnection
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            pass
 
     # Spawn PTY at the correct size from the start
     master_fd, slave_fd = _pty.openpty()
@@ -1479,6 +1615,22 @@ Examples:
             shutil.rmtree(work_dir, ignore_errors=True)
         except Exception:
             pass
+
+
+@app.route("/servers/<name>/ai-session/reset", methods=["POST"])
+@login_required
+def ai_session_reset(name):
+    """Kill the tmux AI session so next connect starts fresh."""
+    uid = current_user.id
+    safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+    session = f"aissh_ai_{uid}_{safe_name}"
+    subprocess.run(
+        ["tmux", "kill-session", "-t", session], capture_output=True, timeout=5
+    )
+    # Clean up work directory
+    work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session)
+    shutil.rmtree(work_dir, ignore_errors=True)
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

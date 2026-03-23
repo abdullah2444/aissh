@@ -322,7 +322,8 @@ body { overflow: hidden; }
   <div class="sp-head">
     <h3>AI (OpenCode)</h3>
     <div style="display:flex;gap:4px;align-items:center;">
-      <button class="act-btn" onclick="reconnectAI()">Reconnect</button>
+      <button class="act-btn" onclick="reconnectAI()" title="Reattach to session">Reattach</button>
+      <button class="act-btn" onclick="newAISession()" title="Kill session and start fresh" style="color:var(--yellow);">New</button>
       <button class="act-btn" onclick="toggleFullscreen('panel-ai')" title="Toggle fullscreen">&#9634;</button>
       <button class="sp-close" onclick="closePanel()">&#x2715;</button>
     </div>
@@ -802,6 +803,13 @@ function connectAI() {
 }
 
 function reconnectAI() {
+  if(_aiTerm) _aiTerm.clear();
+  connectAI();
+}
+
+async function newAISession() {
+  if(!confirm('Kill the current AI session and start fresh?')) return;
+  await fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
   if(_aiTerm) _aiTerm.clear();
   connectAI();
 }

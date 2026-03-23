@@ -50,11 +50,11 @@ echo "[1/6] Package manager: $PKG"
 echo "[2/6] Installing system dependencies..."
 if [ "$PKG" = "apt" ]; then
   apt-get update -qq >/dev/null 2>&1
-  apt-get install -y -qq python3 python3-venv python3-pip nginx sshpass rsync >/dev/null 2>&1
+  apt-get install -y -qq python3 python3-venv python3-pip nginx sshpass rsync tmux >/dev/null 2>&1
 elif [ "$PKG" = "yum" ]; then
-  yum install -y -q python3 python3-pip nginx sshpass rsync >/dev/null 2>&1
+  yum install -y -q python3 python3-pip nginx sshpass rsync tmux >/dev/null 2>&1
 elif [ "$PKG" = "dnf" ]; then
-  dnf install -y -q python3 python3-pip nginx sshpass rsync >/dev/null 2>&1
+  dnf install -y -q python3 python3-pip nginx sshpass rsync tmux >/dev/null 2>&1
 fi
 echo "  Done."
 
