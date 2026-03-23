@@ -1241,7 +1241,7 @@ def _find_ai_cli() -> str | None:
 
 @sock.route("/ws/ai-terminal/<name>")
 def ws_ai_terminal(ws, name):
-    """WebSocket terminal that runs opencode/claude CLI via a local SSH session."""
+    """WebSocket terminal that runs opencode/claude CLI in a local PTY."""
     if not current_user.is_authenticated:
         ws.close()
         return
@@ -1260,40 +1260,63 @@ def ws_ai_terminal(ws, name):
         )
         return
 
-    # SSH into localhost and run the AI CLI from there.
-    # This works because paramiko gives us a proper channel that works
-    # with gevent, unlike pty.openpty() + select.select().
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect("127.0.0.1", port=22, username="root", timeout=5)
-    except Exception as e:
-        ws.send(f"\r\n\x1b[31mCannot connect to local SSH: {e}\x1b[0m\r\n")
-        return
+    import pty as _pty
+    import fcntl
+    import termios
+    import struct
 
-    channel = client.invoke_shell(term="xterm-256color", width=120, height=40)
-    channel.setblocking(False)
-
-    # Set up PATH and launch the AI CLI
+    # Build env
+    env = os.environ.copy()
     cli_dir = os.path.dirname(ai_cli)
-    _time.sleep(0.3)
-    channel.send(f"export PATH={cli_dir}:$PATH && exec {ai_cli}\r")
+    env["PATH"] = cli_dir + ":" + env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    env["TERM"] = "xterm-256color"
+    env["HOME"] = os.path.expanduser("~")
+    env["AISSH_SSH_HOST"] = server["host"]
+    env["AISSH_SSH_PORT"] = str(server.get("port", 22))
+    env["AISSH_SSH_USER"] = server["user"]
+
+    # Spawn PTY
+    master_fd, slave_fd = _pty.openpty()
+    proc = subprocess.Popen(
+        [ai_cli],
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        env=env,
+        preexec_fn=os.setsid,
+    )
+    os.close(slave_fd)
+
+    # Make master_fd non-blocking
+    import fcntl as _fcntl
+
+    flags = _fcntl.fcntl(master_fd, _fcntl.F_GETFL)
+    _fcntl.fcntl(master_fd, _fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
     stop = threading.Event()
 
-    def _ssh_to_ws():
+    def _pty_to_ws():
+        """Read from PTY master and send to WebSocket."""
         while not stop.is_set():
             try:
-                if channel.recv_ready():
-                    data = channel.recv(4096)
-                    if not data:
-                        break
-                    ws.send(data.decode(errors="replace"))
-                elif channel.exit_status_ready():
+                data = os.read(master_fd, 4096)
+                if not data:
                     break
-                else:
-                    _time.sleep(0.01)
-            except Exception:
+                ws.send(data.decode(errors="replace"))
+            except BlockingIOError:
+                _time.sleep(0.02)
+            except OSError:
+                break
+            if proc.poll() is not None:
+                # Process exited, drain remaining output
+                try:
+                    while True:
+                        data = os.read(master_fd, 4096)
+                        if not data:
+                            break
+                        ws.send(data.decode(errors="replace"))
+                except (BlockingIOError, OSError):
+                    pass
                 break
         stop.set()
         try:
@@ -1301,7 +1324,7 @@ def ws_ai_terminal(ws, name):
         except Exception:
             pass
 
-    t = threading.Thread(target=_ssh_to_ws, daemon=True)
+    t = threading.Thread(target=_pty_to_ws, daemon=True)
     t.start()
 
     try:
@@ -1312,23 +1335,32 @@ def ws_ai_terminal(ws, name):
             if isinstance(data, str) and data.startswith("RESIZE:"):
                 try:
                     _, cols, rows = data.split(":")
-                    channel.resize_pty(width=int(cols), height=int(rows))
+                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
+                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
                 except Exception:
                     pass
             else:
-                channel.send(data if isinstance(data, bytes) else data.encode())
+                raw = data if isinstance(data, bytes) else data.encode()
+                try:
+                    os.write(master_fd, raw)
+                except OSError:
+                    break
     except Exception:
         pass
     finally:
         stop.set()
         try:
-            channel.close()
-        except Exception:
+            os.close(master_fd)
+        except OSError:
             pass
         try:
-            client.close()
+            proc.terminate()
+            proc.wait(timeout=3)
         except Exception:
-            pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
     t = threading.Thread(target=_pty_to_ws, daemon=True)
     t.start()
