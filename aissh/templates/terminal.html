@@ -247,7 +247,6 @@ body { overflow: hidden; }
     <span class="srv-addr">{{ server.user }}@{{ server.host }}{% if server.port != 22 %}:{{ server.port }}{% endif %}</span>
   </div>
   <div class="hdr-tabs">
-    <a class="tab active" href="#" onclick="closePanel();return false;">Terminal</a>
     <a class="tab" href="#" onclick="return openPanel('services')">Services</a>
     <a class="tab" href="#" onclick="return openPanel('firewall')">Firewall</a>
     <a class="tab" href="#" onclick="return openPanel('files')">Files</a>
