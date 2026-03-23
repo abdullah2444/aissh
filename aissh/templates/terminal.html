@@ -41,6 +41,13 @@ body { overflow: hidden; }
 }
 .hdr-tabs .tab:hover { color: var(--text); background: var(--surface2); }
 .hdr-tabs .tab.active { color: #fff; background: var(--accent-btn); }
+.hdr-tabs .tab .ai-dot {
+  display: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green); margin-left: 4px;
+  box-shadow: 0 0 6px rgba(34,197,94,.5);
+  animation: blink 1.5s infinite;
+}
+.hdr-tabs .tab .ai-dot.on { display: inline-block; }
 
 /* ── Bookmarks ── */
 .bm-bar {
@@ -123,11 +130,11 @@ body { overflow: hidden; }
   position: fixed; top: 0; right: 0; bottom: 0;
   width: min(460px, 88vw); background: var(--surface);
   border-left: 1px solid var(--border2);
-  box-shadow: -8px 0 40px rgba(0,0,0,.4);
   z-index: 60; display: flex; flex-direction: column;
   transform: translateX(100%); transition: transform .2s ease, width 0s;
+  visibility: hidden;
 }
-.side-panel.open { transform: translateX(0); }
+.side-panel.open { transform: translateX(0); visibility: visible; box-shadow: -8px 0 40px rgba(0,0,0,.4); }
 .side-panel.fullscreen { width: 100vw !important; }
 
 /* Resize handle */
@@ -252,7 +259,7 @@ body { overflow: hidden; }
     <a class="tab" href="#" onclick="return openPanel('files')">Files</a>
     <a class="tab" href="#" onclick="return openPanel('docker')">Docker</a>
     <a class="tab" href="#" onclick="return openPanel('apps')">Apps</a>
-    <a class="tab" href="#" onclick="return openPanel('ai')">AI</a>
+    <a class="tab" href="#" onclick="return openPanel('ai')">AI<span class="ai-dot" id="ai-running-dot"></span></a>
   </div>
 </div>
 
@@ -422,13 +429,18 @@ function closePanel(){
   _activePanel=null;
 }
 
+function _setAIDot(on){
+  var dot = document.getElementById('ai-running-dot');
+  if (dot) dot.classList.toggle('on', on);
+}
+
 function killAI(){
-  // Fully terminate the AI session
   if (_aiSock) try { _aiSock.close(); } catch(_){}
   fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
   _aiReady = false;
   _aiDataBound = false;
   if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
+  _setAIDot(false);
   closePanel();
 }
 
@@ -829,12 +841,13 @@ function connectAI() {
     var cols = _aiTerm ? _aiTerm.cols : 80;
     var rows = _aiTerm ? _aiTerm.rows : 24;
     _aiSock.send('RESIZE:'+Math.max(cols,40)+':'+Math.max(rows,10));
+    _setAIDot(true);
   };
   _aiSock.onmessage = function(e){
     try{_aiTerm.write(typeof e.data==='string'?e.data:new TextDecoder().decode(e.data));}catch(_){}
   };
   _aiSock.onclose = function(){
-    _aiTerm.write('\r\n\x1b[2m--- AI session ended ---\x1b[0m\r\n');
+    if(_aiTerm) _aiTerm.write('\r\n\x1b[2m--- AI session ended ---\x1b[0m\r\n');
   };
   // Only bind onData once
   if (!_aiDataBound) {
