@@ -785,7 +785,12 @@ function connectAI() {
   _aiSock = new WebSocket(proto+'://'+location.host+'/ws/ai-terminal/'+encodeURIComponent(SRV));
   _aiSock.binaryType = 'arraybuffer';
   _aiSock.onopen = function(){
-    _aiSock.send('RESIZE:'+_aiTerm.cols+':'+_aiTerm.rows);
+    // Send size immediately - backend waits for this before spawning opencode
+    var container = document.getElementById('ai-term-container');
+    // Estimate cols/rows from container pixel size if terminal not yet fitted
+    var cols = _aiTerm ? _aiTerm.cols : Math.floor(container.clientWidth / 8);
+    var rows = _aiTerm ? _aiTerm.rows : Math.floor(container.clientHeight / 16);
+    _aiSock.send('RESIZE:'+Math.max(cols,40)+':'+Math.max(rows,10));
   };
   _aiSock.onmessage = function(e){
     try{_aiTerm.write(typeof e.data==='string'?e.data:new TextDecoder().decode(e.data));}catch(_){}

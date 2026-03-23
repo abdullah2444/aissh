@@ -1350,15 +1350,33 @@ Examples:
     with open(os.path.join(work_dir, "CLAUDE.md"), "w") as f:
         f.write(claude_md)
 
-    # Build env
     env = os.environ.copy()
     cli_dir = os.path.dirname(ai_cli)
     env["PATH"] = cli_dir + ":" + env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     env["TERM"] = "xterm-256color"
     env["HOME"] = os.path.expanduser("~")
 
-    # Spawn PTY in the temp working directory
+    try:
+        from gevent.fileobject import FileObject
+        import gevent
+    except ImportError:
+        FileObject = None
+
+    # Wait for the first RESIZE from the frontend so we know the actual panel size
+    init_cols, init_rows = 120, 40
+    try:
+        first_msg = ws.receive(timeout=5)
+        if first_msg and isinstance(first_msg, str) and first_msg.startswith("RESIZE:"):
+            _, c, r = first_msg.split(":")
+            init_cols, init_rows = int(c), int(r)
+    except Exception:
+        pass
+
+    # Spawn PTY at the correct size from the start
     master_fd, slave_fd = _pty.openpty()
+    winsize = struct.pack("HHHH", init_rows, init_cols, 0, 0)
+    fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
     proc = subprocess.Popen(
         [ai_cli],
         stdin=slave_fd,
@@ -1370,16 +1388,9 @@ Examples:
     )
     os.close(slave_fd)
 
-    try:
-        from gevent.fileobject import FileObject
-        import gevent
-    except ImportError:
-        FileObject = None
-
     stop = threading.Event()
 
     if FileObject:
-        # ── Gevent mode (inside gunicorn) ──
         fobj = FileObject(master_fd, "rb", close=False)
 
         def _pty_to_ws():
@@ -1399,7 +1410,7 @@ Examples:
 
         g = gevent.spawn(_pty_to_ws)
     else:
-        # ── Fallback: plain thread (dev server) ──
+
         def _pty_to_ws():
             os.set_blocking(master_fd, False)
             while not stop.is_set():
@@ -1431,6 +1442,13 @@ Examples:
                     _, cols, rows = data.split(":")
                     winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
                     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                    # Signal opencode to redraw
+                    import signal
+
+                    try:
+                        os.kill(proc.pid, signal.SIGWINCH)
+                    except OSError:
+                        pass
                 except Exception:
                     pass
             else:
@@ -1457,7 +1475,6 @@ Examples:
                 proc.kill()
             except Exception:
                 pass
-        # Clean up temp working directory
         try:
             shutil.rmtree(work_dir, ignore_errors=True)
         except Exception:
