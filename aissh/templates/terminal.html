@@ -328,7 +328,6 @@ body { overflow: hidden; }
   <div class="sp-head">
     <h3>AI (OpenCode)</h3>
     <div style="display:flex;gap:4px;align-items:center;">
-      <button class="act-btn" id="ai-resume-btn" onclick="resumeAI()" title="Resume previous session" style="display:none;color:var(--green);">Resume</button>
       <button class="act-btn" onclick="newAISession()" title="Start fresh session">New</button>
       <button class="act-btn" onclick="toggleFullscreen('panel-ai')" title="Toggle fullscreen">&#9634;</button>
       <button class="sp-close" onclick="closePanel()" title="Minimize (AI keeps running)">&#8722;</button>
@@ -776,7 +775,7 @@ function fitAI() {
     if (_aiResizeTimer) clearTimeout(_aiResizeTimer);
     _aiResizeTimer = setTimeout(function() {
       _aiTerm.clear();
-      connectAI(false);
+      connectAI();
     }, 300);
   }
 }
@@ -797,9 +796,6 @@ async function checkAndOpenAI() {
       _aiDataBound = false;
       if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
     }
-    // Show/hide resume button based on whether previous session exists
-    var resumeBtn = document.getElementById('ai-resume-btn');
-    if (resumeBtn) resumeBtn.style.display = d.has_previous ? '' : 'none';
   } catch(e) {}
   initAITerminal();
 }
@@ -840,7 +836,7 @@ function initAITerminal() {
     _aiFit.fit();
     _aiReady = true;
     if (!_aiSock || _aiSock.readyState !== WebSocket.OPEN) {
-      connectAI(false);
+      connectAI();
     } else {
       fitAI();
     }
@@ -852,8 +848,8 @@ function initAITerminal() {
   }, 400);
 }
 
-var _aiDataBound = false, _aiResume = false;
-function connectAI(resume) {
+var _aiDataBound = false;
+function connectAI() {
   if (_aiSock) try { _aiSock.close(); } catch(_){}
   var proto = location.protocol==='https:'?'wss':'ws';
   _aiSock = new WebSocket(proto+'://'+location.host+'/ws/ai-terminal/'+encodeURIComponent(SRV));
@@ -861,8 +857,7 @@ function connectAI(resume) {
   _aiSock.onopen = function(){
     var cols = _aiTerm ? _aiTerm.cols : 80;
     var rows = _aiTerm ? _aiTerm.rows : 24;
-    var prefix = resume ? 'RESUME' : 'RESIZE';
-    _aiSock.send(prefix+':'+Math.max(cols,40)+':'+Math.max(rows,10));
+    _aiSock.send('RESIZE:'+Math.max(cols,40)+':'+Math.max(rows,10));
     _setAIDot(true);
   };
   _aiSock.onmessage = function(e){
@@ -880,23 +875,14 @@ function connectAI(resume) {
 
 function reconnectAI() {
   if(_aiTerm) _aiTerm.clear();
-  connectAI(false);
-}
-
-function resumeAI() {
-  // Kill current tmux if any, then reconnect with --continue flag
-  fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'}).then(function(){
-    if(_aiTerm) _aiTerm.clear();
-    _aiReady = false;
-    connectAI(true);
-  });
+  connectAI();
 }
 
 async function newAISession() {
   if(!confirm('Start a fresh AI session?')) return;
   await fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
   if(_aiTerm) _aiTerm.clear();
-  connectAI(false);
+  connectAI();
 }
 
 async function dkPull(){

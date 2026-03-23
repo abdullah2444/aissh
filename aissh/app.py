@@ -1268,7 +1268,7 @@ def _kill_ai_session(uid, name):
         _active_ai_sessions.pop(uid, None)
 
 
-def _ensure_ai_session(uid, name, server, ai_cli, resume=False):
+def _ensure_ai_session(uid, name, server, ai_cli):
     """Ensure a tmux session with opencode exists for this user+server. Returns session name."""
     safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     session = f"aissh_ai_{uid}_{safe_name}"
@@ -1369,10 +1369,7 @@ Examples:
     cli_dir = os.path.dirname(ai_cli)
     path_env = cli_dir + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
 
-    # Build opencode launch command with optional --continue flag
     launch_cmd = f"export PATH={path_env} && {ai_cli}"
-    if resume:
-        launch_cmd = f"export PATH={path_env} && {ai_cli} --continue"
 
     # Create tmux session running opencode in the work directory
     subprocess.run(
@@ -1440,25 +1437,19 @@ def ws_ai_terminal(ws, name):
     except ImportError:
         FileObject = None
 
-    # Wait for initial message from frontend: "RESIZE:cols:rows" or "RESUME:cols:rows"
+    # Wait for initial size from frontend
     init_cols, init_rows = 120, 40
-    resume_session = False
     try:
         first_msg = ws.receive(timeout=5)
-        if first_msg and isinstance(first_msg, str):
-            if first_msg.startswith("RESUME:"):
-                resume_session = True
-                _, c, r = first_msg.split(":")
-                init_cols, init_rows = int(c), int(r)
-            elif first_msg.startswith("RESIZE:"):
-                _, c, r = first_msg.split(":")
-                init_cols, init_rows = int(c), int(r)
+        if first_msg and isinstance(first_msg, str) and ":" in first_msg:
+            parts = first_msg.split(":")
+            init_cols, init_rows = int(parts[-2]), int(parts[-1])
     except Exception:
         pass
 
     # Ensure tmux session exists (creates if needed, reuses if exists)
     try:
-        session = _ensure_ai_session(uid, name, server, ai_cli, resume=resume_session)
+        session = _ensure_ai_session(uid, name, server, ai_cli)
     except Exception as e:
         ws.send(f"\r\n\x1b[31mFailed to create AI session: {e}\x1b[0m\r\n")
         return
@@ -1582,20 +1573,14 @@ def ws_ai_terminal(ws, name):
 @app.route("/servers/<name>/ai-session/status")
 @login_required
 def ai_session_status(name):
-    """Check if AI is running on this or another server, and if a previous session exists."""
+    """Check if AI is running on this or another server."""
     uid = current_user.id
     active = _active_ai_sessions.get(uid)
-    # Check if opencode has previous sessions in this server's work dir
-    safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
-    session_name = f"aissh_ai_{uid}_{safe_name}"
-    work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session_name)
-    has_previous = os.path.isdir(work_dir)
     return jsonify(
         {
             "running": bool(active),
             "server": active or "",
             "same": active == name,
-            "has_previous": has_previous,
         }
     )
 
@@ -1620,741 +1605,17 @@ def ai_session_switch():
     return jsonify({"ok": True})
 
 
-# ---------------------------------------------------------------------------
-# Snapshots
-# ---------------------------------------------------------------------------
-
-_SNAP_DIR = "~/.aissh_snapshots"
-_SNAP_TS_RE = re.compile(r"^\d{8}_\d{6}$")
-
-
-def _snap_cmd(uid: str, server: dict, cmd: str, timeout: int = 30) -> tuple:
-    client = _get_stats_conn(uid, server)
-    _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
-    return stdout.read().decode().strip(), stderr.read().decode().strip()
-
-
-def _ssh_exec(uid: str, server: dict, cmd: str, timeout: int = 15) -> dict:
-    """Run a command on a server, return {stdout, stderr, exit_code}."""
-    try:
-        client = _get_stats_conn(uid, server)
-        _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
-        exit_code = stdout.channel.recv_exit_status()
-        return {
-            "stdout": stdout.read().decode("utf-8", errors="replace").strip(),
-            "stderr": stderr.read().decode("utf-8", errors="replace").strip(),
-            "exit_code": exit_code,
-        }
-    except Exception as e:
-        return {"stdout": "", "stderr": str(e), "exit_code": -1}
-
-
-# ---------------------------------------------------------------------------
-# Bookmarks (saved commands per server)
-# ---------------------------------------------------------------------------
-
-
-def _bookmarks_file(uid: str) -> Path:
-    return DATA_DIR / uid / "bookmarks.json"
-
-
-def _load_bookmarks(uid: str) -> dict:
-    f = _bookmarks_file(uid)
-    if f.exists():
-        try:
-            return json.loads(f.read_text())
-        except Exception:
-            pass
-    return {}
-
-
-def _save_bookmarks(uid: str, data: dict):
-    f = _bookmarks_file(uid)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-
-
-# ---------------------------------------------------------------------------
-# Quick Actions
-# ---------------------------------------------------------------------------
-
-_QUICK_ACTIONS = {
-    "reboot": {
-        "label": "Reboot Server",
-        "cmd": "reboot",
-        "confirm": True,
-        "timeout": 5,
-    },
-    "disk": {
-        "label": "Disk Usage",
-        "cmd": "df -hT --total 2>/dev/null || df -h",
-        "timeout": 10,
-        "parse": "disk",
-    },
-    "memory": {
-        "label": "Memory Info",
-        "cmd": "free -h",
-        "timeout": 10,
-        "parse": "memory",
-    },
-    "processes": {
-        "label": "Top Processes",
-        "cmd": "ps -eo pid,user,%cpu,%mem,rss,stat,comm --sort=-%mem 2>/dev/null | head -21",
-        "timeout": 10,
-        "parse": "table",
-    },
-    "connections": {
-        "label": "Active Connections",
-        "cmd": "ss -tunap 2>/dev/null | head -40 || netstat -tunap 2>/dev/null | head -40",
-        "timeout": 10,
-        "parse": "table",
-    },
-    "update": {
-        "label": "Update Packages",
-        "cmd": "export DEBIAN_FRONTEND=noninteractive; (apt-get update -qq && apt-get upgrade -y 2>&1) || (yum update -y 2>&1) || (dnf update -y 2>&1)",
-        "confirm": True,
-        "timeout": 300,
-    },
-    "ports": {
-        "label": "Listening Ports",
-        "cmd": "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null",
-        "timeout": 10,
-        "parse": "ports",
-    },
-    "scan": {
-        "label": "Server Scan",
-        "cmd": (
-            "echo '=DOCKER=' && (docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null || echo 'N/A') && "
-            "echo '=APPS=' && ps -eo pid,args --sort=-%mem 2>/dev/null | grep -E 'gunicorn|node |flask|python.*app|uvicorn|pm2|nginx' | grep -v grep | head -8 && "
-            "echo '=DIRS=' && ls /root/ /opt/ /var/www/ /home/ 2>/dev/null && "
-            "echo '=SERVICES=' && systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | "
-            "grep -vE 'systemd|ssh|cron|snap|getty|user@|dbus|network|udev|journal|login|polkit|resolved|fstrim|multipathd|irq|mod|serial|unattended|packagekit|cloud|accounts' | head -10"
-        ),
-        "timeout": 15,
-    },
-    "uptime": {
-        "label": "System Info",
-        "cmd": "echo '--- Uptime ---' && uptime && echo '--- OS ---' && cat /etc/os-release 2>/dev/null | head -4 && echo '--- Kernel ---' && uname -a",
-        "timeout": 10,
-    },
-}
-
-
-def _parse_action_output(parse_type: str, raw: str) -> dict | None:
-    """Parse raw command output into structured data for the frontend."""
-    if not raw:
-        return None
-    lines = raw.strip().splitlines()
-    if parse_type == "ports":
-        rows = []
-        for line in lines[1:]:  # skip header
-            parts = line.split()
-            if len(parts) < 4:
-                continue
-            addr = parts[3]
-            port = addr.rsplit(":", 1)[-1] if ":" in addr else addr
-            # Extract process from users:(("name",pid=N,fd=N))
-            proc_raw = " ".join(parts[5:]) if len(parts) > 5 else ""
-            m = re.search(r'"([^"]+)"', proc_raw)
-            proc = m.group(1) if m else "-"
-            rows.append({"Port": port, "Address": addr, "Process": proc})
-        return (
-            {"columns": ["Port", "Address", "Process"], "rows": rows} if rows else None
-        )
-    if parse_type == "disk":
-        if len(lines) < 2:
-            return None
-        rows = []
-        for line in lines[1:]:
-            p = line.split(None, 6)
-            if len(p) >= 7:
-                rows.append(
-                    {
-                        "Filesystem": p[0],
-                        "Type": p[1],
-                        "Size": p[2],
-                        "Used": p[3],
-                        "Avail": p[4],
-                        "Use%": p[5],
-                        "Mount": p[6],
-                    }
-                )
-            elif len(p) >= 6:
-                rows.append(
-                    {
-                        "Filesystem": p[0],
-                        "Type": "-",
-                        "Size": p[1],
-                        "Used": p[2],
-                        "Avail": p[3],
-                        "Use%": p[4],
-                        "Mount": p[5],
-                    }
-                )
-        return (
-            {
-                "columns": [
-                    "Filesystem",
-                    "Type",
-                    "Size",
-                    "Used",
-                    "Avail",
-                    "Use%",
-                    "Mount",
-                ],
-                "rows": rows,
-            }
-            if rows
-            else None
-        )
-    if parse_type == "memory":
-        if len(lines) < 2:
-            return None
-        hdr = lines[0].split()
-        rows = []
-        for line in lines[1:]:
-            p = line.split(None, len(hdr))
-            if len(p) >= 2:
-                row = {"": p[0].rstrip(":")}
-                for i, h in enumerate(hdr):
-                    row[h] = p[i + 1] if i + 1 < len(p) else "-"
-                rows.append(row)
-        cols = [""] + hdr
-        return {"columns": cols, "rows": rows} if rows else None
-    if parse_type == "table":
-        if len(lines) < 2:
-            return None
-        hdr = lines[0].split()
-        rows = []
-        for line in lines[1:]:
-            p = line.split(None, len(hdr) - 1)
-            if p:
-                row = {}
-                for i, h in enumerate(hdr):
-                    row[h] = p[i] if i < len(p) else ""
-                rows.append(row)
-        return {"columns": hdr, "rows": rows} if rows else None
-    return None
-
-
-@app.route("/servers/<name>/action", methods=["POST"])
-@login_required
-def server_quick_action(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    data = request.get_json() or {}
-    action = data.get("action", "")
-    if action not in _QUICK_ACTIONS:
-        return jsonify({"error": f"Unknown action: {action}"}), 400
-    spec = _QUICK_ACTIONS[action]
-    result = _ssh_exec(uid, server, spec["cmd"], timeout=spec.get("timeout", 15))
-    raw = result["stdout"] or result["stderr"]
-    resp = {
-        "action": action,
-        "label": spec["label"],
-        "output": raw,
-        "exit_code": result["exit_code"],
-    }
-    if spec.get("parse"):
-        parsed = _parse_action_output(spec["parse"], raw)
-        if parsed:
-            resp["parsed"] = parsed
-    return jsonify(resp)
-
-
-# ---------------------------------------------------------------------------
-# Bookmarks routes
-# ---------------------------------------------------------------------------
-
-
-@app.route("/servers/<name>/bookmarks")
-@login_required
-def get_bookmarks(name):
-    uid = current_user.id
-    bm = _load_bookmarks(uid)
-    return jsonify({"bookmarks": bm.get(name, [])})
-
-
-@app.route("/servers/<name>/bookmarks", methods=["POST"])
-@login_required
-def add_bookmark(name):
-    uid = current_user.id
-    data = request.get_json() or {}
-    label = data.get("label", "").strip()[:60]
-    command = data.get("command", "").strip()[:500]
-    if not command:
-        return jsonify({"error": "Command is required"}), 400
-    bm = _load_bookmarks(uid)
-    if name not in bm:
-        bm[name] = []
-    bm[name].append(
-        {
-            "id": str(uuid.uuid4())[:8],
-            "label": label or command[:30],
-            "command": command,
-            "created": datetime.now().isoformat(),
-        }
-    )
-    _save_bookmarks(uid, bm)
-    return jsonify({"ok": True})
-
-
-@app.route("/servers/<name>/bookmarks/<bm_id>", methods=["DELETE"])
-@login_required
-def delete_bookmark(name, bm_id):
-    uid = current_user.id
-    bm = _load_bookmarks(uid)
-    if name in bm:
-        bm[name] = [b for b in bm[name] if b["id"] != bm_id]
-        _save_bookmarks(uid, bm)
-    return jsonify({"ok": True})
-
-
-# ---------------------------------------------------------------------------
-# Service Manager
-# ---------------------------------------------------------------------------
-
-
-@app.route("/servers/<name>/services")
-@login_required
-def list_services(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    result = _ssh_exec(
-        uid,
-        server,
-        "systemctl list-units --type=service --all --no-pager --no-legend "
-        "--plain 2>/dev/null | awk '{print $1,$2,$3,$4}'",
-        timeout=15,
-    )
-    if result["exit_code"] != 0:
-        return jsonify({"error": result["stderr"] or "Failed to list services"}), 500
-    services = []
-    for line in result["stdout"].splitlines():
-        parts = line.split(None, 3)
-        if len(parts) >= 4:
-            services.append(
-                {
-                    "unit": parts[0],
-                    "load": parts[1],
-                    "active": parts[2],
-                    "sub": parts[3],
-                }
-            )
-    return jsonify({"services": services})
-
-
-@app.route("/servers/<name>/services/<unit>/action", methods=["POST"])
-@login_required
-def service_action(name, unit):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    data = request.get_json() or {}
-    action = data.get("action", "")
-    if action not in ("start", "stop", "restart", "enable", "disable"):
-        return jsonify({"error": f"Invalid action: {action}"}), 400
-    # Sanitize unit name
-    safe_unit = re.sub(r"[^a-zA-Z0-9@._\-]", "", unit)
-    result = _ssh_exec(uid, server, f"systemctl {action} {safe_unit} 2>&1", timeout=30)
-    return jsonify(
-        {
-            "action": action,
-            "unit": safe_unit,
-            "output": result["stdout"] or result["stderr"],
-            "exit_code": result["exit_code"],
-        }
-    )
-
-
-@app.route("/servers/<name>/services/<unit>/logs")
-@login_required
-def service_logs(name, unit):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    safe_unit = re.sub(r"[^a-zA-Z0-9@._\-]", "", unit)
-    lines = int(request.args.get("lines", 100))
-    lines = min(max(lines, 10), 500)
-    result = _ssh_exec(
-        uid,
-        server,
-        f"journalctl -u {safe_unit} -n {lines} --no-pager 2>&1",
-        timeout=15,
-    )
-    return jsonify({"logs": result["stdout"], "exit_code": result["exit_code"]})
-
-
-# ---------------------------------------------------------------------------
-# Firewall Manager (UFW)
-# ---------------------------------------------------------------------------
-
-
-@app.route("/servers/<name>/firewall")
-@login_required
-def firewall_status(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-
-    # Check if ufw is available
-    result = _ssh_exec(
-        uid,
-        server,
-        "command -v ufw >/dev/null 2>&1 && echo ok || echo missing",
-        timeout=5,
-    )
-    if "missing" in result["stdout"]:
-        # Fallback: try iptables
-        ipt = _ssh_exec(uid, server, "iptables -L -n --line-numbers 2>&1", timeout=10)
-        return jsonify(
-            {
-                "backend": "iptables",
-                "enabled": True,
-                "rules_raw": ipt["stdout"],
-                "rules": [],
-            }
-        )
-
-    status = _ssh_exec(uid, server, "ufw status numbered 2>&1", timeout=10)
-    enabled = "Status: active" in status["stdout"]
-    rules = []
-    for line in status["stdout"].splitlines():
-        line = line.strip()
-        if line.startswith("["):
-            # Parse "[ 1] 22/tcp  ALLOW IN  Anywhere"
-            parts = line.split("]", 1)
-            if len(parts) == 2:
-                num = parts[0].replace("[", "").strip()
-                rule_text = parts[1].strip()
-                rules.append({"num": num, "rule": rule_text})
-    return jsonify(
-        {
-            "backend": "ufw",
-            "enabled": enabled,
-            "rules_raw": status["stdout"],
-            "rules": rules,
-        }
-    )
-
-
-@app.route("/servers/<name>/firewall/toggle", methods=["POST"])
-@login_required
-def firewall_toggle(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    data = request.get_json() or {}
-    enable = data.get("enable", True)
-    cmd = "ufw --force enable" if enable else "ufw --force disable"
-    result = _ssh_exec(uid, server, cmd, timeout=10)
-    return jsonify(
-        {
-            "output": result["stdout"] or result["stderr"],
-            "exit_code": result["exit_code"],
-        }
-    )
-
-
-@app.route("/servers/<name>/firewall/rule", methods=["POST"])
-@login_required
-def firewall_add_rule(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    data = request.get_json() or {}
-    action = data.get("action", "allow")  # allow or deny
-    port = data.get("port", "").strip()
-    proto = data.get("proto", "").strip()
-    from_ip = data.get("from", "").strip()
-
-    if action not in ("allow", "deny"):
-        return jsonify({"error": "Action must be allow or deny"}), 400
-    if not port:
-        return jsonify({"error": "Port is required"}), 400
-
-    # Sanitize inputs
-    port = re.sub(r"[^0-9:/]", "", port)
-    proto = re.sub(r"[^a-z]", "", proto)
-    from_ip = re.sub(r"[^0-9./:]", "", from_ip)
-
-    cmd = f"ufw {action}"
-    if from_ip:
-        cmd += f" from {from_ip}"
-    cmd += f" to any port {port}"
-    if proto:
-        cmd += f" proto {proto}"
-    result = _ssh_exec(uid, server, cmd + " 2>&1", timeout=10)
-    return jsonify(
-        {
-            "output": result["stdout"] or result["stderr"],
-            "exit_code": result["exit_code"],
-        }
-    )
-
-
-@app.route("/servers/<name>/firewall/rule/<num>", methods=["DELETE"])
-@login_required
-def firewall_delete_rule(name, num):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    safe_num = re.sub(r"[^0-9]", "", num)
-    result = _ssh_exec(
-        uid, server, f"echo 'y' | ufw delete {safe_num} 2>&1", timeout=10
-    )
-    return jsonify(
-        {
-            "output": result["stdout"] or result["stderr"],
-            "exit_code": result["exit_code"],
-        }
-    )
-
-
-# ---------------------------------------------------------------------------
-# File Manager (SFTP)
-# ---------------------------------------------------------------------------
-
-
-def _get_sftp(uid: str, server: dict):
-    """Get an SFTP client via the stats connection pool."""
-    client = _get_stats_conn(uid, server)
-    return client.open_sftp()
-
-
-@app.route("/servers/<name>/files")
-@login_required
-def file_list(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    path = request.args.get("path", "/")
-    try:
-        sftp = _get_sftp(uid, server)
-        entries = []
-        for attr in sftp.listdir_attr(path):
-            import stat as stat_module
-
-            is_dir = stat_module.S_ISDIR(attr.st_mode) if attr.st_mode else False
-            is_link = stat_module.S_ISLNK(attr.st_mode) if attr.st_mode else False
-            entries.append(
-                {
-                    "name": attr.filename,
-                    "size": attr.st_size or 0,
-                    "is_dir": is_dir,
-                    "is_link": is_link,
-                    "mtime": attr.st_mtime or 0,
-                    "mode": oct(attr.st_mode & 0o7777) if attr.st_mode else "0000",
-                }
-            )
-        entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
-        return jsonify({"path": path, "entries": entries})
-    except PermissionError:
-        return jsonify({"error": f"Permission denied: {path}"}), 403
-    except FileNotFoundError:
-        return jsonify({"error": f"Not found: {path}"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/servers/<name>/files/read")
-@login_required
-def file_read(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    path = request.args.get("path", "")
-    if not path:
-        return jsonify({"error": "Path is required"}), 400
-    try:
-        sftp = _get_sftp(uid, server)
-        stat_info = sftp.stat(path)
-        # Limit to 2MB for text editing
-        if stat_info.st_size > 2 * 1024 * 1024:
-            return jsonify({"error": "File too large (max 2MB for editing)"}), 413
-        with sftp.open(path, "r") as f:
-            content = f.read().decode("utf-8", errors="replace")
-        return jsonify({"path": path, "content": content, "size": stat_info.st_size})
-    except PermissionError:
-        return jsonify({"error": f"Permission denied: {path}"}), 403
-    except FileNotFoundError:
-        return jsonify({"error": f"Not found: {path}"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/servers/<name>/files/write", methods=["POST"])
-@login_required
-def file_write(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    data = request.get_json() or {}
-    path = data.get("path", "")
-    content = data.get("content", "")
-    if not path:
-        return jsonify({"error": "Path is required"}), 400
-    try:
-        sftp = _get_sftp(uid, server)
-        with sftp.open(path, "w") as f:
-            f.write(content.encode("utf-8"))
-        return jsonify({"ok": True, "path": path})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/servers/<name>/files/upload", methods=["POST"])
-@login_required
-def file_upload(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    dest_path = request.form.get("path", "/tmp")
-    file_obj = request.files.get("file")
-    if not file_obj or not file_obj.filename:
-        return jsonify({"error": "No file provided"}), 400
-    try:
-        sftp = _get_sftp(uid, server)
-        dest = dest_path.rstrip("/") + "/" + file_obj.filename
-        sftp.putfo(file_obj.stream, dest)
-        return jsonify({"ok": True, "path": dest})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/servers/<name>/files/download")
-@login_required
-def file_download(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    path = request.args.get("path", "")
-    if not path:
-        return jsonify({"error": "Path is required"}), 400
-    try:
-        sftp = _get_sftp(uid, server)
-        stat_info = sftp.stat(path)
-        if stat_info.st_size > 100 * 1024 * 1024:
-            return jsonify({"error": "File too large (max 100MB)"}), 413
-
-        def generate():
-            with sftp.open(path, "rb") as f:
-                while True:
-                    chunk = f.read(65536)
-                    if not chunk:
-                        break
-                    yield chunk
-
-        filename = path.rsplit("/", 1)[-1] or "download"
-        return Response(
-            generate(),
-            mimetype="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/servers/<name>/files/mkdir", methods=["POST"])
-@login_required
-def file_mkdir(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    data = request.get_json() or {}
-    path = data.get("path", "")
-    if not path:
-        return jsonify({"error": "Path is required"}), 400
-    try:
-        sftp = _get_sftp(uid, server)
-        sftp.mkdir(path)
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/servers/<name>/files/delete", methods=["POST"])
-@login_required
-def file_delete(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    data = request.get_json() or {}
-    path = data.get("path", "")
-    if not path or path == "/":
-        return jsonify({"error": "Invalid path"}), 400
-    try:
-        # Use rm -rf for directories, unlink for files
-        result = _ssh_exec(uid, server, f"rm -rf {json.dumps(path)} 2>&1", timeout=10)
-        return jsonify(
-            {
-                "ok": result["exit_code"] == 0,
-                "output": result["stdout"] or result["stderr"],
-            }
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/servers/<name>/files/rename", methods=["POST"])
-@login_required
-def file_rename(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-    data = request.get_json() or {}
-    old_path = data.get("old_path", "")
-    new_path = data.get("new_path", "")
-    if not old_path or not new_path:
-        return jsonify({"error": "Both old_path and new_path required"}), 400
-    try:
-        sftp = _get_sftp(uid, server)
-        sftp.rename(old_path, new_path)
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# ---------------------------------------------------------------------------
-# App / Process Manager
-# ---------------------------------------------------------------------------
-
-# Script that discovers running apps with their details
 _APP_DISCOVER_SCRIPT = r"""
 import json, os, re
-
 apps = []
 seen_pids = set()
-
-# Read all /proc entries
 for pid_str in os.listdir('/proc'):
-    if not pid_str.isdigit():
-        continue
+    if not pid_str.isdigit(): continue
     pid = int(pid_str)
     try:
         with open(f'/proc/{pid}/cmdline', 'rb') as f:
             cmdline = f.read().decode('utf-8', errors='replace').replace('\x00', ' ').strip()
-        if not cmdline:
-            continue
-        # Filter: only interesting processes
+        if not cmdline: continue
         is_app = False
         app_type = 'process'
         for pattern, atype in [
@@ -2370,67 +1631,43 @@ for pid_str in os.listdir('/proc'):
             ('pm2', 'pm2'), ('php-fpm', 'php'),
         ]:
             if pattern in cmdline.lower():
-                is_app = True
-                app_type = atype
-                break
-        if not is_app:
-            continue
-        # Skip kernel threads and short-lived
-        with open(f'/proc/{pid}/stat') as f:
-            stat = f.read().split()
-        ppid = int(stat[3])
-        rss_pages = int(stat[23])
+                is_app = True; app_type = atype; break
+        if not is_app: continue
+        with open(f'/proc/{pid}/stat') as f: stat = f.read().split()
+        ppid = int(stat[3]); rss_pages = int(stat[23])
         rss_mb = round(rss_pages * 4096 / 1048576, 1)
-        # Get start time
-        with open(f'/proc/{pid}/status') as f:
-            status_lines = f.readlines()
+        with open(f'/proc/{pid}/status') as f: status_lines = f.readlines()
         user = '?'
         for line in status_lines:
             if line.startswith('Uid:'):
                 uid = int(line.split()[1])
                 try:
-                    import pwd
-                    user = pwd.getpwuid(uid).pw_name
+                    import pwd; user = pwd.getpwuid(uid).pw_name
                 except: user = str(uid)
                 break
-        # Get working directory
-        try:
-            cwd = os.readlink(f'/proc/{pid}/cwd')
+        try: cwd = os.readlink(f'/proc/{pid}/cwd')
         except: cwd = '?'
-        # Get listening port
         port = None
         try:
             for proto in ['tcp', 'tcp6']:
                 with open(f'/proc/net/{proto}') as f:
                     for line in f.readlines()[1:]:
-                        parts = line.split()
-                        inode = parts[9]
-                        # Check if this pid owns this socket
+                        parts = line.split(); inode = parts[9]
                         fd_dir = f'/proc/{pid}/fd'
                         if os.path.isdir(fd_dir):
                             for fd in os.listdir(fd_dir):
                                 try:
                                     link = os.readlink(f'{fd_dir}/{fd}')
                                     if f'socket:[{inode}]' == link and parts[3] == '0A':
-                                        port_hex = parts[1].split(':')[1]
-                                        port = int(port_hex, 16)
-                                        break
+                                        port = int(parts[1].split(':')[1], 16); break
                                 except: pass
                         if port: break
                 if port: break
         except: pass
-        # Short command for display
-        short_cmd = cmdline[:120]
-        apps.append({
-            'pid': pid, 'ppid': ppid, 'type': app_type, 'user': user,
-            'cmd': short_cmd, 'cwd': cwd, 'port': port,
-            'mem_mb': rss_mb,
-        })
+        apps.append({'pid': pid, 'ppid': ppid, 'type': app_type, 'user': user,
+            'cmd': cmdline[:120], 'cwd': cwd, 'port': port, 'mem_mb': rss_mb})
         seen_pids.add(pid)
-    except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
-        continue
-
-# Sort: by type then by memory
+    except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError): continue
 apps.sort(key=lambda a: (-a['mem_mb'],))
 print(json.dumps(apps))
 """
