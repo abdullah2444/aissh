@@ -1249,7 +1249,8 @@ def ws_ai_terminal(ws, name):
         "command -v opencode >/dev/null 2>&1 && exec opencode || "
         "(command -v claude >/dev/null 2>&1 && exec claude || "
         "echo -e '\\033[31mNeither opencode nor claude CLI is installed.\\033[0m\\n"
-        "Install: npm install -g @anthropic/opencode  OR  npm install -g @anthropic-ai/claude-code')\r"
+        "Install OpenCode: curl -fsSL https://opencode.ai/install | bash\\n"
+        "Install Claude Code: npm install -g @anthropic-ai/claude-code')\r"
     )
 
     stop = threading.Event()
