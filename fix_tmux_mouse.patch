@@ -1,0 +1,14 @@
+--- aissh/app.py
++++ aissh/app.py
+@@ -1216,6 +1216,11 @@
+         capture_output=True,
+         timeout=2,
+     )
++    subprocess.run(
++        ["tmux", "set-option", "-t", session, "mouse", "on"],
++        capture_output=True,
++        timeout=2,
++    )
+     _active_ai_sessions[uid] = name
+     return session
+ 

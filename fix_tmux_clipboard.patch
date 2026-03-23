@@ -1,0 +1,16 @@
+--- aissh/app.py
++++ aissh/app.py
+@@ -1212,7 +1212,12 @@
+         timeout=2,
+     )
+     subprocess.run(
+-        ["tmux", "set-option", "-t", session, "set-clipboard", "on"],
++        ["tmux", "set-option", "-s", "set-clipboard", "on"],
++        capture_output=True,
++        timeout=2,
++    )
++    subprocess.run(
++        ["tmux", "set-option", "-as", "terminal-overrides", ",xterm-256color:Ms=\\E]52;%p1%s;%p2%s\\007"],
+         capture_output=True,
+         timeout=2,
+     )

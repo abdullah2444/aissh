@@ -28,12 +28,16 @@
     transition: all .2s ease;
     position: relative;
     border-top: 2px solid transparent;
+    overflow: visible;
   }
   .srv-card:hover {
     border-color: var(--border2);
     border-top-color: var(--accent-btn);
     box-shadow: 0 8px 24px rgba(0,0,0,.2);
     transform: translateY(-2px);
+  }
+  .srv-card.card-menu-open {
+    z-index: 50;
   }
 
   .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
@@ -55,12 +59,12 @@
   .badge-pem { background: rgba(34,197,94,.08); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
   .badge-pw  { background: rgba(59,130,246,.06); color: var(--accent); border: 1px solid rgba(59,130,246,.15); }
 
-  .card-actions { display: flex; gap: 5px; align-items: center; }
+  .card-actions { display: flex; gap: 6px; align-items: center; }
   .card-actions > a.ctl,
   .card-actions > div,
   .card-actions > form { flex: 1; min-width: 0; }
   .card-actions > a.ctl:first-child { flex: 2; }
-  .card-actions .ctl { font-size: 11.5px; width: 100%; height: 30px; }
+  .card-actions .ctl { font-size: 11.5px; width: 100%; height: 32px; }
   .card-actions > form { display: flex; }
   .card-actions > form > .ctl { flex: 1; }
 
@@ -392,7 +396,11 @@ document.addEventListener('click', function(e) {
     var menu = toggle.parentElement.querySelector('.qa-menu');
     var wasOpen = menu.classList.contains('show');
     document.querySelectorAll('.qa-menu.show').forEach(function(m){ m.classList.remove('show'); });
-    if (!wasOpen) menu.classList.add('show');
+    document.querySelectorAll('.card-menu-open').forEach(function(c){ c.classList.remove('card-menu-open'); });
+    if (!wasOpen) {
+      menu.classList.add('show');
+      toggle.closest('.srv-card').classList.add('card-menu-open');
+    }
     return;
   }
   // Action button clicked
@@ -402,12 +410,14 @@ document.addEventListener('click', function(e) {
     var srv = actBtn.getAttribute('data-srv');
     var act = actBtn.getAttribute('data-act');
     document.querySelectorAll('.qa-menu.show').forEach(function(m){ m.classList.remove('show'); });
+    document.querySelectorAll('.card-menu-open').forEach(function(c){ c.classList.remove('card-menu-open'); });
     runQuickAction(srv, act);
     return;
   }
   // Click outside - close all
   if (!e.target.closest('.qa-menu')) {
     document.querySelectorAll('.qa-menu.show').forEach(function(m){ m.classList.remove('show'); });
+    document.querySelectorAll('.card-menu-open').forEach(function(c){ c.classList.remove('card-menu-open'); });
   }
 });
 

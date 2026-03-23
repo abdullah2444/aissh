@@ -1,0 +1,906 @@
+{% extends "base.html" %}
+{% block title %}{{ server.name }} -- Terminal{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10/lib/addon-fit.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11/lib/addon-web-links.js"></script>
+<style>
+body { overflow: hidden; }
+.main-content {
+  flex: 1; min-height: 0; padding: 0; max-width: 100%; margin: 0;
+  width: 100%; display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ── Header bar ── */
+.term-hdr {
+  min-height: 40px; padding: 0 10px;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0; flex-wrap: nowrap;
+}
+.hdr-left { display: flex; align-items: center; gap: 6px; min-width: 0; flex-shrink: 1; overflow: hidden; }
+.hdr-left .back-btn {
+  color: var(--muted); text-decoration: none; font-size: 14px; padding: 4px 6px;
+  border-radius: 4px; transition: all .12s; flex-shrink: 0; line-height: 1;
+}
+.hdr-left .back-btn:hover { color: var(--text); background: var(--surface2); }
+.hdr-left .srv-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+.hdr-left .srv-addr {
+  font-size: 10.5px; color: var(--muted); font-family: 'JetBrains Mono',monospace;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 2px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.hdr-tabs { display: flex; gap: 1px; flex-shrink: 0; margin-left: auto; }
+.hdr-tabs .tab {
+  font-size: 11px; font-weight: 500; color: var(--muted);
+  padding: 5px 10px; border-radius: 5px; text-decoration: none;
+  transition: all .12s; white-space: nowrap;
+}
+.hdr-tabs .tab:hover { color: var(--text); background: var(--surface2); }
+.hdr-tabs .tab.active { color: #fff; background: var(--accent-btn); }
+.hdr-tabs .tab .ai-dot {
+  display: none; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green); margin-left: 4px;
+  box-shadow: 0 0 6px rgba(34,197,94,.5);
+  animation: blink 1.5s infinite;
+}
+.hdr-tabs .tab .ai-dot.on { display: inline-block; }
+
+/* ── Bookmarks ── */
+.bm-bar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 10px; background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+  overflow-x: auto; scrollbar-width: none;
+}
+.bm-bar::-webkit-scrollbar { display: none; }
+.bm-list { display: flex; gap: 3px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.bm-list::-webkit-scrollbar { display: none; }
+.bm-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 4px; font-size: 10.5px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text2); cursor: pointer; white-space: nowrap;
+  transition: all .12s; flex-shrink: 0;
+}
+.bm-chip:hover { background: var(--surface3); border-color: var(--border2); }
+.bm-chip .bm-x {
+  font-size: 8px; color: var(--muted); cursor: pointer;
+  padding: 1px 2px; border-radius: 2px; line-height: 1;
+}
+.bm-chip .bm-x:hover { color: var(--red); background: rgba(239,68,68,.15); }
+.bm-add {
+  all: unset; font-size: 10px; color: var(--muted); cursor: pointer;
+  padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+  transition: all .12s; flex-shrink: 0;
+}
+.bm-add:hover { color: var(--accent); background: var(--surface2); }
+
+/* ── Stats row ── */
+.stats-row {
+  display: flex; align-items: stretch; padding: 5px 8px; gap: 3px;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  flex-shrink: 0; overflow-x: auto; scrollbar-width: none;
+}
+.stats-row::-webkit-scrollbar { display: none; }
+.s-card {
+  display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  padding: 5px 8px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 5px;
+  min-width: 64px; flex-shrink: 0; min-height: 38px;
+}
+.s-lbl { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); line-height: 1; }
+.s-val { font-size: 11px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1; font-family: 'JetBrains Mono',monospace; }
+.s-bar { width: 100%; height: 2px; background: var(--surface3); border-radius: 1px; overflow: hidden; }
+.s-fill { height: 100%; border-radius: 1px; background: var(--accent); transition: width .8s ease, background .4s; }
+.s-fill.warn { background: var(--yellow); }
+.s-fill.crit { background: var(--red); }
+#stats-err { font-size: 10px; color: var(--red); align-self: center; padding-left: 4px; }
+
+/* ── Terminal ── */
+.term-body { flex: 1; min-height: 0; background: #0a0e14; overflow: hidden; }
+#terminal { width: 100%; height: 100%; padding: 2px; }
+
+/* ── Status bar ── */
+.conn-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 10px; height: 20px;
+  background: var(--surface); border-top: 1px solid var(--border);
+  flex-shrink: 0; font-size: 10px; color: var(--muted);
+  font-family: 'JetBrains Mono',monospace; line-height: 20px;
+}
+.conn-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); transition: all .3s; flex-shrink: 0; }
+.conn-dot.ok { background: var(--green); box-shadow: 0 0 6px rgba(34,197,94,.4); }
+.conn-dot.err { background: var(--red); box-shadow: 0 0 6px rgba(239,68,68,.4); }
+.conn-dot.wait { background: var(--yellow); animation: blink 1s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+.conn-spacer { flex: 1; }
+.conn-dim { color: var(--surface3); }
+
+/* ── Side panels ── */
+.sp-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 59;
+  display: none;
+}
+.sp-overlay.open { display: block; }
+.side-panel {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(460px, 88vw); background: var(--surface);
+  border-left: 1px solid var(--border2);
+  z-index: 60; display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .2s ease, width 0s;
+  visibility: hidden;
+}
+.side-panel.open { transform: translateX(0); visibility: visible; box-shadow: -8px 0 40px rgba(0,0,0,.4); }
+.side-panel.fullscreen { width: 100vw !important; }
+
+/* Resize handle */
+.sp-resize {
+  position: absolute; top: 0; left: -4px; bottom: 0; width: 8px;
+  cursor: col-resize; z-index: 2;
+}
+.sp-resize:hover, .sp-resize.dragging { background: var(--accent); opacity: .3; }
+.sp-resize.dragging { opacity: .5; }
+.sp-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.sp-head h3 { margin: 0; font-size: 13px; font-weight: 700; }
+.sp-close {
+  all: unset; cursor: pointer; font-size: 14px; color: var(--muted);
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  border-radius: 5px; transition: all .12s;
+}
+.sp-close:hover { color: var(--text); background: var(--surface2); }
+.sp-body { flex: 1; overflow-y: auto; padding: 10px 14px; }
+
+/* Side panel table */
+.sp-body table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sp-body th {
+  text-align: left; padding: 5px 6px; font-size: 9px; font-weight: 700;
+  color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+  border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1;
+}
+.sp-body td { padding: 5px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.sp-body tr:hover td { background: var(--surface2); }
+.act-btn {
+  all: unset; font-size: 10px; padding: 2px 7px; border-radius: 3px;
+  cursor: pointer; border: 1px solid var(--border); color: var(--text2);
+  transition: all .1s; display: inline-flex; align-items: center;
+}
+.act-btn:hover { background: var(--surface3); border-color: var(--border2); }
+.act-btn.danger { color: var(--red); }
+.act-btn.danger:hover { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.3); }
+.badge-active { color: var(--green); font-weight: 600; font-size: 11px; }
+.badge-inactive { color: var(--muted); font-size: 11px; }
+.badge-failed { color: var(--red); font-weight: 600; font-size: 11px; }
+
+/* Log viewer */
+.log-view {
+  background: var(--bg); color: var(--text2); border: 1px solid var(--border);
+  border-radius: 6px; font-family: 'JetBrains Mono',monospace;
+  font-size: 10.5px; line-height: 1.5; padding: 8px; margin-top: 8px;
+  max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+}
+
+/* File manager */
+.fm-path {
+  display: flex; align-items: center; gap: 3px; margin-bottom: 6px;
+  font-size: 11px; font-family: 'JetBrains Mono',monospace; color: var(--muted);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; padding: 5px 8px; flex-wrap: wrap;
+}
+.fm-path a { color: var(--accent); text-decoration: none; cursor: pointer; }
+.fm-path a:hover { text-decoration: underline; }
+.fm-path .fm-spacer { flex: 1; }
+.fm-entry {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 6px; border-radius: 4px; cursor: pointer;
+  font-size: 12px; transition: background .08s; border-bottom: 1px solid rgba(30,37,48,.3);
+}
+.fm-entry:last-child { border-bottom: none; }
+.fm-entry:hover { background: var(--surface2); }
+.fm-icon { width: 14px; text-align: center; flex-shrink: 0; font-size: 10px; }
+.fm-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fm-size { font-size: 10px; color: var(--muted); flex-shrink: 0; font-family: monospace; }
+.fm-mode { font-size: 9px; color: var(--muted); font-family: monospace; flex-shrink: 0; }
+.fm-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.fm-actions button {
+  all: unset; font-size: 9px; padding: 1px 5px; border-radius: 3px;
+  cursor: pointer; color: var(--muted); transition: all .1s;
+  border: 1px solid transparent;
+}
+.fm-actions button:hover { color: var(--text); background: var(--surface3); border-color: var(--border); }
+.fm-actions button.del:hover { color: var(--red); background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.2); }
+
+/* Firewall */
+.fw-toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 12px; }
+.fw-add-form {
+  display: flex; gap: 5px; align-items: flex-end; flex-wrap: wrap;
+  padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px;
+}
+.fw-add-form label { font-size: 10px; margin: 0; flex-shrink: 0; }
+.fw-add-form input, .fw-add-form select {
+  height: 26px; font-size: 11px; padding: 2px 6px; border-radius: 5px; width: auto;
+}
+
+/* ── AI Terminal ── */
+#ai-term-container { display: flex; flex-direction: column; }
+#ai-term-container .xterm { flex: 1; height: 100%; }
+#ai-term-container .xterm-viewport { height: 100% !important; }
+#ai-term-container .xterm-screen { height: 100%; }
+
+/* ── Mobile ── */
+@media (max-width: 600px) {
+  .hdr-left .srv-addr { display: none; }
+  .hdr-tabs { gap: 0; }
+  .hdr-tabs .tab { padding: 4px 6px; font-size: 10px; }
+  .s-card { min-width: 52px; padding: 3px 5px; }
+  .s-lbl { font-size: 7px; }
+  .s-val { font-size: 10px; }
+  .side-panel { width: 100vw; }
+}
+@media (max-width: 400px) {
+  .hdr-tabs .tab { padding: 3px 5px; font-size: 9px; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="term-hdr">
+  <div class="hdr-left">
+    <a class="back-btn" href="{{ url_for('index') }}">&#8592;</a>
+    <span class="srv-name">{{ server.name }}</span>
+    <span class="srv-addr">{{ server.user }}@{{ server.host }}{% if server.port != 22 %}:{{ server.port }}{% endif %}</span>
+  </div>
+  <div class="hdr-tabs">
+    <a class="tab" href="#" onclick="return openPanel('services')">Services</a>
+    <a class="tab" href="#" onclick="return openPanel('firewall')">Firewall</a>
+    <a class="tab" href="#" onclick="return openPanel('files')">Files</a>
+    <a class="tab" href="#" onclick="return openPanel('docker')">Docker</a>
+    <a class="tab" href="#" onclick="return openPanel('apps')">Apps</a>
+    <a class="tab" href="#" onclick="return openPanel('ai')">AI<span class="ai-dot" id="ai-running-dot"></span></a>
+  </div>
+</div>
+
+<div class="bm-bar" id="bm-bar" style="display:none">
+  <div class="bm-list" id="bm-list"></div>
+  <button class="bm-add" onclick="addBookmark()">+ Save Cmd</button>
+</div>
+
+<div class="stats-row">
+  <div class="s-card"><span class="s-lbl">CPU</span><span class="s-val" id="cpu-val">--</span><div class="s-bar"><div class="s-fill" id="cpu-fill"></div></div></div>
+  <div class="s-card"><span class="s-lbl">RAM</span><span class="s-val" id="ram-val">--</span><div class="s-bar"><div class="s-fill" id="ram-fill"></div></div></div>
+  <div class="s-card" id="swap-item" style="display:none"><span class="s-lbl">Swap</span><span class="s-val" id="swp-val">--</span><div class="s-bar"><div class="s-fill" id="swp-fill"></div></div></div>
+  <div class="s-card"><span class="s-lbl">Disk</span><span class="s-val" id="disk-val">--</span><div class="s-bar"><div class="s-fill" id="disk-fill"></div></div></div>
+  <div class="s-card"><span class="s-lbl">Load</span><span class="s-val" id="load-val">--</span></div>
+  <div class="s-card"><span class="s-lbl">Cores</span><span class="s-val" id="cores-val">--</span></div>
+  <div class="s-card"><span class="s-lbl">Uptime</span><span class="s-val" id="uptime-val">--</span></div>
+  <div class="s-card"><span class="s-lbl">Net RX</span><span class="s-val" id="net-rx-val">--</span></div>
+  <div class="s-card"><span class="s-lbl">Net TX</span><span class="s-val" id="net-tx-val">--</span></div>
+  <div class="s-card"><span class="s-lbl">Conn</span><span class="s-val" id="conn-val">--</span></div>
+  <span id="stats-err"></span>
+</div>
+
+<div class="term-body"><div id="terminal"></div></div>
+
+<div class="conn-bar">
+  <span class="conn-dot wait" id="conn-dot"></span>
+  <span id="conn-label">Connecting...</span>
+  <span class="conn-spacer"></span>
+  <span class="conn-dim" id="term-size"></span>
+</div>
+
+<!-- Side panel overlay -->
+<div class="sp-overlay" id="sp-overlay" onclick="closePanel()"></div>
+
+<!-- Panels -->
+<div class="side-panel" id="panel-services">
+  <div class="sp-resize" onmousedown="startResize(event,'panel-services')"></div>
+  <div class="sp-head"><h3>Services</h3><div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-services')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div></div>
+  <div class="sp-body" id="svc-body"></div>
+</div>
+<div class="side-panel" id="panel-firewall">
+  <div class="sp-resize" onmousedown="startResize(event,'panel-firewall')"></div>
+  <div class="sp-head"><h3>Firewall</h3><div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-firewall')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div></div>
+  <div class="sp-body" id="fw-body"></div>
+</div>
+<div class="side-panel" id="panel-files">
+  <div class="sp-resize" onmousedown="startResize(event,'panel-files')"></div>
+  <div class="sp-head"><h3>File Manager</h3><div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-files')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div></div>
+  <div class="sp-body" id="fm-body"></div>
+</div>
+<div class="side-panel" id="panel-docker">
+  <div class="sp-resize" onmousedown="startResize(event,'panel-docker')"></div>
+  <div class="sp-head"><h3>Docker</h3><div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-docker')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div></div>
+  <div class="sp-body" id="dk-body"></div>
+</div>
+<div class="side-panel" id="panel-apps">
+  <div class="sp-resize" onmousedown="startResize(event,'panel-apps')"></div>
+  <div class="sp-head">
+    <h3>Apps &amp; Packages</h3>
+    <div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-apps')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div>
+  </div>
+  <div class="sp-body" id="apps-body"></div>
+</div>
+<div class="side-panel" id="panel-ai" style="display:flex;flex-direction:column;">
+  <div class="sp-resize" onmousedown="startResize(event,'panel-ai')"></div>
+  <div class="sp-head">
+    <h3>AI (OpenCode)</h3>
+    <div style="display:flex;gap:4px;align-items:center;">
+      <button class="act-btn" onclick="newAISession()" title="Start fresh session">New</button>
+      <button class="act-btn" onclick="toggleFullscreen('panel-ai')" title="Toggle fullscreen">&#9634;</button>
+      <button class="sp-close" onclick="closePanel()" title="Minimize (AI keeps running)">&#8722;</button>
+      <button class="sp-close" onclick="killAI()" title="Close and terminate AI" style="color:var(--red);">&#x2715;</button>
+    </div>
+  </div>
+  <div id="ai-term-container" style="flex:1;min-height:0;min-width:0;overflow:hidden;padding:2px;background:#0a0e14;"></div>
+</div>
+
+<script>
+var SRV = {{ server.name | tojson }};
+
+/* ── Stats ── */
+function fmtMB(m){return m>=1024?(m/1024).toFixed(1)+'G':m+'M';}
+function bar(id,p){var e=document.getElementById(id);if(!e)return;e.style.width=Math.min(p,100)+'%';e.className='s-fill'+(p>=90?' crit':p>=70?' warn':'');}
+async function poll(){
+  try{
+    var r=await fetch('/chat/'+encodeURIComponent(SRV)+'/stats');
+    var d=await r.json();
+    if(d.error){document.getElementById('stats-err').textContent=d.error;return;}
+    document.getElementById('stats-err').textContent='';
+    bar('cpu-fill',d.cpu);document.getElementById('cpu-val').textContent=d.cpu+'%';
+    var rp=Math.round(d.ram_used/d.ram_total*100);
+    bar('ram-fill',rp);document.getElementById('ram-val').textContent=fmtMB(d.ram_used)+'/'+fmtMB(d.ram_total);
+    if(d.swap_total>0){bar('swp-fill',Math.round(d.swap_used/d.swap_total*100));document.getElementById('swp-val').textContent=fmtMB(d.swap_used)+'/'+fmtMB(d.swap_total);document.getElementById('swap-item').style.display='flex';}
+    var dp=Math.round(d.disk_used/d.disk_total*100);
+    bar('disk-fill',dp);document.getElementById('disk-val').textContent=fmtMB(d.disk_used)+'/'+fmtMB(d.disk_total);
+    document.getElementById('load-val').textContent=d.load;
+    document.getElementById('cores-val').textContent=d.cores;
+    var u=d.uptime,dy=Math.floor(u/86400),hr=Math.floor((u%86400)/3600),mn=Math.floor((u%3600)/60);
+    document.getElementById('uptime-val').textContent=dy>0?dy+'d '+hr+'h':hr>0?hr+'h '+mn+'m':mn+'m';
+    if(d.network){var k=Object.keys(d.network)[0];if(k){document.getElementById('net-rx-val').textContent=d.network[k].rx_speed+' KB/s';document.getElementById('net-tx-val').textContent=d.network[k].tx_speed+' KB/s';}else{document.getElementById('net-rx-val').textContent='--';document.getElementById('net-tx-val').textContent='--';}}
+    document.getElementById('conn-val').textContent=d.connections||'--';
+  }catch(_){document.getElementById('stats-err').textContent='unavailable';}
+}
+poll();setInterval(poll,2000);
+
+/* ── Terminal ── */
+(function(){
+  var term=new Terminal({cursorBlink:true,cursorStyle:'bar',fontSize:14,
+    fontFamily:'"JetBrains Mono","Fira Code","SF Mono","Consolas",monospace',
+    fontWeight:'400',lineHeight:1.2,scrollback:10000,
+    theme:{background:'#0a0e14',foreground:'#b8c4d4',cursor:'#3b82f6',cursorAccent:'#0a0e14',
+      selectionBackground:'rgba(59,130,246,.2)',
+      black:'#1a2028',red:'#ef4444',green:'#22c55e',yellow:'#eab308',blue:'#3b82f6',magenta:'#a78bfa',cyan:'#22d3ee',white:'#b8c4d4',
+      brightBlack:'#5e6e82',brightRed:'#fca5a5',brightGreen:'#4ade80',brightYellow:'#fde047',brightBlue:'#60a5fa',brightMagenta:'#c4b5fd',brightCyan:'#67e8f9',brightWhite:'#e2e8f0'}});
+  var fit=new FitAddon.FitAddon();term.loadAddon(fit);
+  try{term.loadAddon(new WebLinksAddon.WebLinksAddon());}catch(_){}
+  term.open(document.getElementById('terminal'));fit.fit();
+  document.getElementById('term-size').textContent=term.cols+'x'+term.rows;
+  var dot=document.getElementById('conn-dot'),lbl=document.getElementById('conn-label');
+  var proto=location.protocol==='https:'?'wss':'ws';
+  var sock=new WebSocket(proto+'://'+location.host+'/ws/terminal/'+encodeURIComponent(SRV));
+  sock.binaryType='arraybuffer';
+  sock.onopen=function(){dot.className='conn-dot ok';lbl.textContent='Connected';sock.send('RESIZE:'+term.cols+':'+term.rows);};
+  sock.onmessage=function(e){try{term.write(typeof e.data==='string'?e.data:new TextDecoder().decode(e.data));}catch(_){}};
+  sock.onclose=function(){dot.className='conn-dot err';lbl.textContent='Disconnected';term.write('\r\n\x1b[2m--- session ended ---\x1b[0m\r\n');};
+  sock.onerror=function(){dot.className='conn-dot err';lbl.textContent='Connection error';};
+  term.onData(function(d){try{sock.send(d);}catch(_){}});
+  term.onSelectionChange(function(){var s=term.getSelection();if(s)navigator.clipboard.writeText(s).catch(function(){});});
+  document.getElementById('terminal').addEventListener('contextmenu',function(e){e.preventDefault();navigator.clipboard.readText().then(function(t){term.paste(t);}).catch(function(){});});
+  new ResizeObserver(function(){fit.fit();document.getElementById('term-size').textContent=term.cols+'x'+term.rows;if(sock.readyState===WebSocket.OPEN)sock.send('RESIZE:'+term.cols+':'+term.rows);}).observe(document.getElementById('terminal'));
+  window._term=term;window._sock=sock;
+})();
+
+/* ── Bookmarks ── */
+async function loadBookmarks(){
+  try{var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/bookmarks');var d=await r.json();
+  var list=document.getElementById('bm-list'),bar=document.getElementById('bm-bar');
+  if(!d.bookmarks||!d.bookmarks.length){bar.style.display='none';return;}
+  bar.style.display='flex';
+  list.innerHTML=d.bookmarks.map(function(b){
+    return '<span class="bm-chip" onclick="runBookmark('+JSON.stringify(b.command).replace(/"/g,'&quot;')+')" title="'+b.command.replace(/"/g,'&quot;')+'">'+b.label+'<span class="bm-x" onclick="event.stopPropagation();delBookmark(\''+b.id+'\')">x</span></span>';
+  }).join('');}catch(_){}}
+function runBookmark(cmd){if(window._sock&&window._sock.readyState===WebSocket.OPEN)window._sock.send(cmd+'\r');}
+async function addBookmark(){var cmd=prompt('Command to save:');if(!cmd)return;var label=prompt('Label (optional):',cmd.substring(0,30));await fetch('/servers/'+encodeURIComponent(SRV)+'/bookmarks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({command:cmd,label:label||cmd.substring(0,30)})});loadBookmarks();}
+async function delBookmark(id){await fetch('/servers/'+encodeURIComponent(SRV)+'/bookmarks/'+id,{method:'DELETE'});loadBookmarks();}
+loadBookmarks();
+
+/* ── Side Panels ── */
+var _activePanel=null;
+function openPanel(name){
+  var ov=document.getElementById('sp-overlay');
+  document.querySelectorAll('.side-panel').forEach(function(p){p.classList.remove('open');});
+  document.querySelectorAll('.hdr-tabs .tab').forEach(function(t){t.classList.remove('active');});
+  if(name===_activePanel){_activePanel=null;ov.classList.remove('open');document.querySelector('.hdr-tabs .tab:first-child').classList.add('active');return false;}
+  _activePanel=name;ov.classList.add('open');
+  var panel=document.getElementById('panel-'+name);if(panel)panel.classList.add('open');
+  document.querySelectorAll('.hdr-tabs .tab').forEach(function(t){if(t.textContent.toLowerCase()===name)t.classList.add('active');});
+  if(name==='services')loadServices();else if(name==='firewall')loadFirewall();else if(name==='files')loadFiles('/');else if(name==='docker')loadDocker();else if(name==='apps')loadApps();else if(name==='ai')checkAndOpenAI();
+  return false;
+}
+function closePanel(){
+  // Just hide the panel -- AI keeps running in background
+  document.querySelectorAll('.side-panel').forEach(function(p){p.classList.remove('open');});
+  document.getElementById('sp-overlay').classList.remove('open');
+  document.querySelectorAll('.hdr-tabs .tab').forEach(function(t){t.classList.remove('active');});
+  _activePanel=null;
+}
+
+function _setAIDot(on){
+  var dot = document.getElementById('ai-running-dot');
+  if (dot) dot.classList.toggle('on', on);
+}
+
+function killAI(){
+  if (_aiSock) try { _aiSock.close(); } catch(_){}
+  fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
+  _aiReady = false;
+  _aiDataBound = false;
+  if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
+  _setAIDot(false);
+  closePanel();
+}
+
+/* ── Services ── */
+async function loadServices(){
+  var body=document.getElementById('svc-body');body.innerHTML='<p style="color:var(--muted);font-size:12px;">Loading...</p>';
+  try{var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/services');var d=await r.json();
+  if(d.error){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+d.error+'</p>';return;}
+  var h='<table><thead><tr><th>Service</th><th>Status</th><th style="width:140px;">Actions</th></tr></thead><tbody>';
+  d.services.forEach(function(s){var cls=s.active==='active'?'badge-active':s.active==='failed'?'badge-failed':'badge-inactive';
+    h+='<tr><td style="font-size:10.5px;font-family:monospace;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+s.unit+'</td><td><span class="'+cls+'">'+s.active+'</span></td><td style="white-space:nowrap;"><button class="act-btn" onclick="svcAction(\''+s.unit+'\',\'restart\')">Restart</button> <button class="act-btn" onclick="svcAction(\''+s.unit+'\',\''+(s.active==='active'?'stop':'start')+'\')">'+
+      (s.active==='active'?'Stop':'Start')+'</button> <button class="act-btn" onclick="svcLogs(\''+s.unit+'\')">Logs</button></td></tr>';});
+  h+='</tbody></table>';body.innerHTML=h;}catch(e){body.innerHTML='<p style="color:var(--red);font-size:12px;">Error: '+e.message+'</p>';}}
+async function svcAction(u,a){await fetch('/servers/'+encodeURIComponent(SRV)+'/services/'+encodeURIComponent(u)+'/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a})});loadServices();}
+async function svcLogs(u){var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/services/'+encodeURIComponent(u)+'/logs?lines=80');var d=await r.json();document.getElementById('svc-body').innerHTML='<button class="act-btn" onclick="loadServices()" style="margin-bottom:6px;">&#8592; Back to services</button><div style="font-size:11px;color:var(--muted);margin-bottom:4px;">'+u+'</div><div class="log-view">'+((d.logs||'No logs').replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</div>';}
+
+/* ── Firewall ── */
+async function loadFirewall(){
+  var body=document.getElementById('fw-body');body.innerHTML='<p style="color:var(--muted);font-size:12px;">Loading...</p>';
+  try{var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/firewall');var d=await r.json();
+  if(d.error){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+d.error+'</p>';return;}
+  var h='';
+  if(d.backend==='ufw'){
+    h+='<div class="fw-toggle">UFW: <strong style="color:'+(d.enabled?'var(--green)':'var(--muted)')+';">'+(d.enabled?'Active':'Inactive')+'</strong> <button class="act-btn" onclick="fwToggle('+(d.enabled?'false':'true')+')" style="margin-left:6px;">'+(d.enabled?'Disable':'Enable')+'</button></div>';
+    h+='<div class="fw-add-form"><label>Port<input type="text" id="fw-port" placeholder="80" style="width:55px;"></label><label>Proto<select id="fw-proto" style="width:55px;"><option value="">Any</option><option value="tcp">TCP</option><option value="udp">UDP</option></select></label><label>From<input type="text" id="fw-from" placeholder="any" style="width:80px;"></label><label>Act<select id="fw-action" style="width:58px;"><option value="allow">Allow</option><option value="deny">Deny</option></select></label><button class="act-btn" onclick="fwAdd()" style="margin-bottom:4px;">+ Add</button></div>';
+    if(d.rules.length){h+='<table><thead><tr><th>#</th><th>Rule</th><th></th></tr></thead><tbody>';d.rules.forEach(function(r){h+='<tr><td>'+r.num+'</td><td style="font-family:monospace;font-size:10.5px;">'+r.rule+'</td><td><button class="act-btn danger" onclick="fwDel(\''+r.num+'\')">Del</button></td></tr>';});h+='</tbody></table>';}
+    else h+='<p style="color:var(--muted);font-size:12px;margin-top:8px;">No rules configured.</p>';
+  }else{h+='<p style="font-size:11px;color:var(--muted);margin-bottom:6px;">iptables (read-only view)</p><div class="log-view">'+d.rules_raw.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';}
+  body.innerHTML=h;}catch(e){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+e.message+'</p>';}}
+async function fwToggle(en){await fetch('/servers/'+encodeURIComponent(SRV)+'/firewall/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enable:en})});loadFirewall();}
+async function fwAdd(){var p=document.getElementById('fw-port').value.trim();if(!p){alert('Port required');return;}await fetch('/servers/'+encodeURIComponent(SRV)+'/firewall/rule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({port:p,proto:document.getElementById('fw-proto').value,from:document.getElementById('fw-from').value,action:document.getElementById('fw-action').value})});loadFirewall();}
+async function fwDel(n){if(!confirm('Delete rule #'+n+'?'))return;await fetch('/servers/'+encodeURIComponent(SRV)+'/firewall/rule/'+n,{method:'DELETE'});loadFirewall();}
+
+/* ── File Manager ── */
+var _fmPath='/';
+function fmtSize(b){if(b<1024)return b+'B';if(b<1048576)return(b/1024).toFixed(1)+'K';if(b<1073741824)return(b/1048576).toFixed(1)+'M';return(b/1073741824).toFixed(1)+'G';}
+async function loadFiles(path){
+  _fmPath=path;var body=document.getElementById('fm-body');body.innerHTML='<p style="color:var(--muted);font-size:12px;">Loading...</p>';
+  try{var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/files?path='+encodeURIComponent(path));var d=await r.json();
+  if(d.error){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+d.error+'</p>';return;}
+  var parts=path.split('/').filter(Boolean),bc='<div class="fm-path"><a onclick="loadFiles(\'/\');">/</a>',cum='/';
+  parts.forEach(function(p){cum+=(cum==='/'?'':'/')+p;bc+=' <a onclick="loadFiles(\''+cum+'\');">'+p+'</a> /';});
+  bc+='<span class="fm-spacer"></span><button class="act-btn" onclick="fmUpload()">Upload</button> <button class="act-btn" onclick="fmMkdir()">+ Dir</button></div>';
+  var entries='';
+  if(path!=='/'){var parent=path.replace(/\/[^\/]+\/?$/,'')||'/';entries+='<div class="fm-entry" onclick="loadFiles(\''+parent+'\')"><span class="fm-icon" style="color:var(--accent);">..</span><span class="fm-name" style="color:var(--muted);">Parent</span></div>';}
+  d.entries.forEach(function(e){var full=(path==='/'?'/':path+'/')+e.name;var icon=e.is_dir?'&#128193;':e.is_link?'&#128279;':'&#128196;';
+    entries+='<div class="fm-entry"'+(e.is_dir?' onclick="loadFiles(\''+full+'\')"':'')+' title="'+full+'"><span class="fm-icon">'+icon+'</span><span class="fm-name"'+(e.is_dir?' style="color:var(--accent);"':'')+'>'+e.name+'</span><span class="fm-mode">'+e.mode+'</span><span class="fm-size">'+fmtSize(e.size)+'</span><div class="fm-actions">'+(e.is_dir?'':'<button onclick="event.stopPropagation();fmEdit(\''+full+'\')">Edit</button><button onclick="event.stopPropagation();fmDownload(\''+full+'\')">DL</button>')+'<button class="del" onclick="event.stopPropagation();fmDelete(\''+full+'\',\''+e.name+'\')">Del</button></div></div>';});
+  body.innerHTML=bc+entries;}catch(e){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+e.message+'</p>';}}
+async function fmEdit(path){var body=document.getElementById('fm-body');body.innerHTML='<p style="color:var(--muted);font-size:12px;">Loading...</p>';try{var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/files/read?path='+encodeURIComponent(path));var d=await r.json();if(d.error){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+d.error+'</p>';return;}body.innerHTML='<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><button class="act-btn" onclick="loadFiles(\''+_fmPath+'\')">&#8592; Back</button><span style="font-size:10px;font-family:monospace;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+path+'</span><button class="act-btn" style="background:var(--accent-btn);color:#fff;border-color:var(--accent-btn);" onclick="fmSave(\''+path+'\')">Save</button></div><textarea id="fm-editor" style="width:100%;height:calc(100vh - 180px);background:var(--bg);color:var(--text2);border:1px solid var(--border);border-radius:6px;font-family:JetBrains Mono,monospace;font-size:11.5px;line-height:1.5;padding:8px;resize:none;outline:none;">'+d.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</textarea>';}catch(e){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+e.message+'</p>';}}
+async function fmSave(path){var c=document.getElementById('fm-editor').value;var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/files/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path,content:c})});var d=await r.json();if(d.ok)alert('Saved!');else alert(d.error||'Failed');}
+function fmDownload(p){window.open('/servers/'+encodeURIComponent(SRV)+'/files/download?path='+encodeURIComponent(p),'_blank');}
+async function fmDelete(p,n){if(!confirm('Delete '+n+'?'))return;await fetch('/servers/'+encodeURIComponent(SRV)+'/files/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});loadFiles(_fmPath);}
+function fmMkdir(){var n=prompt('Directory name:');if(!n)return;fetch('/servers/'+encodeURIComponent(SRV)+'/files/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:(_fmPath==='/'?'/':_fmPath+'/')+n})}).then(function(){loadFiles(_fmPath);});}
+function fmUpload(){var i=document.createElement('input');i.type='file';i.onchange=function(){if(!i.files[0])return;var fd=new FormData();fd.append('file',i.files[0]);fd.append('path',_fmPath);fetch('/servers/'+encodeURIComponent(SRV)+'/files/upload',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){if(d.ok)loadFiles(_fmPath);else alert(d.error||'Failed');});};i.click();}
+
+/* ── Docker ── */
+async function loadDocker(){
+  var body=document.getElementById('dk-body');
+  body.innerHTML='<p style="color:var(--muted);font-size:12px;">Loading containers...</p>';
+  try{
+    var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/docker');
+    var d=await r.json();
+    if(d.error){body.innerHTML='<p style="color:var(--muted);font-size:12px;">'+d.error+'</p>';return;}
+    var h='';
+    // Containers
+    if(d.containers.length){
+      d.containers.forEach(function(c){
+        var running=c.state==='running';
+        var dotCls=running?'badge-active':c.state==='exited'?'badge-failed':'badge-inactive';
+        h+='<div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:6px;">';
+        h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">';
+        h+='<span class="'+dotCls+'" style="font-size:11px;">&#9679;</span>';
+        h+='<strong style="font-size:12px;flex:1;">'+c.name+'</strong>';
+        h+='<span style="font-size:10px;color:var(--muted);">'+c.id+'</span>';
+        h+='</div>';
+        h+='<div style="font-size:10.5px;color:var(--muted);margin-bottom:4px;font-family:monospace;">'+c.image+'</div>';
+        h+='<div style="font-size:10.5px;color:var(--muted);margin-bottom:6px;">'+c.status+'</div>';
+        if(c.ports) h+='<div style="font-size:10px;color:var(--accent);margin-bottom:6px;font-family:monospace;word-break:break-all;">'+c.ports+'</div>';
+        // Actions
+        h+='<div style="display:flex;gap:3px;flex-wrap:wrap;">';
+        if(running){
+          h+='<button class="act-btn" onclick="dkAction(\''+c.id+'\',\'restart\')">Restart</button>';
+          h+='<button class="act-btn" onclick="dkAction(\''+c.id+'\',\'stop\')">Stop</button>';
+        }else{
+          h+='<button class="act-btn" onclick="dkAction(\''+c.id+'\',\'start\')">Start</button>';
+        }
+        h+='<button class="act-btn" onclick="dkLogs(\''+c.id+'\',\''+c.name+'\')">Logs</button>';
+        h+='<button class="act-btn" onclick="dkStats(\''+c.id+'\',\''+c.name+'\')">Stats</button>';
+        h+='<button class="act-btn danger" onclick="dkAction(\''+c.id+'\',\'remove\')">Remove</button>';
+        h+='</div></div>';
+      });
+    }else{
+      h+='<p style="color:var(--muted);font-size:12px;">No containers found.</p>';
+    }
+    // Images summary
+    if(d.images.length){
+      h+='<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);">';
+      h+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Images ('+d.images.length+')</div>';
+      d.images.forEach(function(img){
+        h+='<div style="display:flex;gap:6px;font-size:11px;padding:2px 0;color:var(--text2);">';
+        h+='<span style="flex:1;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+img.name+'</span>';
+        h+='<span style="color:var(--muted);flex-shrink:0;">'+img.size+'</span>';
+        h+='</div>';
+      });
+      h+='</div>';
+    }
+    // Pull image
+    h+='<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:4px;align-items:center;">';
+    h+='<input type="text" id="dk-pull-img" placeholder="image:tag" style="flex:1;height:26px;font-size:11px;padding:2px 6px;font-family:monospace;">';
+    h+='<button class="act-btn" onclick="dkPull()">Pull</button>';
+    h+='</div>';
+    body.innerHTML=h;
+  }catch(e){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+e.message+'</p>';}
+}
+async function dkAction(id,action){
+  if(action==='remove'&&!confirm('Remove container '+id+'? This cannot be undone.'))return;
+  if(action==='stop'&&!confirm('Stop container '+id+'?'))return;
+  await fetch('/servers/'+encodeURIComponent(SRV)+'/docker/'+id+'/action',{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action})});
+  loadDocker();
+}
+async function dkLogs(id,name){
+  var body=document.getElementById('dk-body');
+  body.innerHTML='<p style="color:var(--muted);font-size:12px;">Loading logs...</p>';
+  var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/docker/'+id+'/logs?lines=150');
+  var d=await r.json();
+  body.innerHTML='<button class="act-btn" onclick="loadDocker()" style="margin-bottom:6px;">&#8592; Back</button>'
+    +'<div style="font-size:11px;color:var(--muted);margin-bottom:4px;">'+name+'</div>'
+    +'<div class="log-view" style="max-height:calc(100vh - 180px);">'+((d.logs||'No logs').replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</div>';
+}
+async function dkStats(id,name){
+  var body=document.getElementById('dk-body');
+  body.innerHTML='<p style="color:var(--muted);font-size:12px;">Loading stats...</p>';
+  var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/docker/'+id+'/stats');
+  var d=await r.json();
+  if(d.error){body.innerHTML='<button class="act-btn" onclick="loadDocker()">&#8592; Back</button><p style="color:var(--red);font-size:12px;margin-top:6px;">'+d.error+'</p>';return;}
+  var h='<button class="act-btn" onclick="loadDocker()" style="margin-bottom:6px;">&#8592; Back</button>';
+  h+='<div style="font-size:11px;color:var(--muted);margin-bottom:8px;">'+name+'</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">';
+  var items=[['CPU',d.cpu],['Memory',d.mem_usage],['Mem %',d.mem_pct],['Net I/O',d.net_io],['Block I/O',d.block_io],['PIDs',d.pids]];
+  items.forEach(function(it){
+    h+='<div style="background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:8px;">';
+    h+='<div style="font-size:9px;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.06em;">'+it[0]+'</div>';
+    h+='<div style="font-size:13px;font-weight:600;color:var(--text);font-family:monospace;margin-top:3px;">'+(it[1]||'-')+'</div>';
+    h+='</div>';
+  });
+  h+='</div>';
+  body.innerHTML=h;
+}
+/* ── Apps & Packages ── */
+var _appsView='apps'; // 'apps' or 'packages'
+async function loadApps(){
+  var body=document.getElementById('apps-body');
+  body.innerHTML='<div style="display:flex;gap:2px;margin-bottom:8px;">'
+    +'<button class="act-btn'+((_appsView==='apps')?' active':'')+'" onclick="_appsView=\'apps\';loadApps()" style="'+(_appsView==='apps'?'background:var(--accent-btn);color:#fff;border-color:var(--accent-btn);':'')+'">Running Apps</button>'
+    +'<button class="act-btn'+((_appsView==='packages')?' active':'')+'" onclick="_appsView=\'packages\';loadApps()" style="'+(_appsView==='packages'?'background:var(--accent-btn);color:#fff;border-color:var(--accent-btn);':'')+'">Packages</button>'
+    +'</div><p style="color:var(--muted);font-size:12px;">Loading...</p>';
+  if(_appsView==='packages'){loadPackages();return;}
+  try{
+    var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/apps');
+    var d=await r.json();
+    if(d.error){body.innerHTML+='<p style="color:var(--red);font-size:12px;">'+d.error+'</p>';return;}
+    var tabs='<div style="display:flex;gap:2px;margin-bottom:8px;">'
+      +'<button class="act-btn" onclick="_appsView=\'apps\';loadApps()" style="background:var(--accent-btn);color:#fff;border-color:var(--accent-btn);">Running Apps</button>'
+      +'<button class="act-btn" onclick="_appsView=\'packages\';loadApps()">Packages</button>'
+      +'</div>';
+    var h=tabs;
+    if(!d.apps.length){h+='<p style="color:var(--muted);font-size:12px;">No application processes detected.</p>';body.innerHTML=h;return;}
+    // Group by type
+    var groups={};
+    d.apps.forEach(function(a){if(!groups[a.type])groups[a.type]=[];groups[a.type].push(a);});
+    var typeIcons={python:'&#128013;',node:'&#9889;',gunicorn:'&#128013;',flask:'&#128013;',django:'&#128013;',
+      nginx:'&#127760;',apache:'&#127760;',redis:'&#128308;',postgres:'&#128451;',mysql:'&#128451;',
+      docker:'&#128051;',java:'&#9749;','x-ui':'&#128274;',xray:'&#128274;',cloudflared:'&#9729;',ttyd:'&#128187;'};
+    Object.keys(groups).sort().forEach(function(type){
+      h+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:8px 0 4px;">'
+        +(typeIcons[type]||'&#9670;')+' '+type+' ('+groups[type].length+')</div>';
+      groups[type].forEach(function(a){
+        h+='<div style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:5px;">';
+        // Header: PID + port + memory
+        h+='<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">';
+        h+='<span class="badge-active" style="font-size:10px;">&#9679;</span>';
+        h+='<strong style="font-size:11px;">PID '+a.pid+'</strong>';
+        if(a.port) h+='<span style="font-size:10px;color:var(--accent);font-family:monospace;background:rgba(59,130,246,.08);padding:1px 5px;border-radius:3px;">:'+a.port+'</span>';
+        h+='<span style="flex:1;"></span>';
+        h+='<span style="font-size:10px;color:var(--muted);">'+a.mem_mb+' MB</span>';
+        h+='</div>';
+        // Command
+        h+='<div style="font-size:10px;color:var(--text2);font-family:monospace;word-break:break-all;margin-bottom:3px;">'+a.cmd.replace(/</g,'&lt;')+'</div>';
+        // CWD + user
+        h+='<div style="font-size:9.5px;color:var(--muted);margin-bottom:5px;">'+a.user+' &middot; '+a.cwd+'</div>';
+        // Actions
+        h+='<div style="display:flex;gap:3px;">';
+        h+='<button class="act-btn" onclick="appLogs('+a.pid+')">Logs</button>';
+        h+='<button class="act-btn" onclick="appRestart('+a.pid+')">Restart</button>';
+        h+='<button class="act-btn danger" onclick="appStop('+a.pid+',false)">Stop</button>';
+        h+='<button class="act-btn danger" onclick="appStop('+a.pid+',true)">Kill</button>';
+        h+='</div></div>';
+      });
+    });
+    body.innerHTML=h;
+  }catch(e){body.innerHTML='<p style="color:var(--red);font-size:12px;">'+e.message+'</p>';}
+}
+async function loadPackages(){
+  var body=document.getElementById('apps-body');
+  var tabs='<div style="display:flex;gap:2px;margin-bottom:8px;">'
+    +'<button class="act-btn" onclick="_appsView=\'apps\';loadApps()">Running Apps</button>'
+    +'<button class="act-btn" onclick="_appsView=\'packages\';loadApps()" style="background:var(--accent-btn);color:#fff;border-color:var(--accent-btn);">Packages</button>'
+    +'</div>';
+  body.innerHTML=tabs+'<p style="color:var(--muted);font-size:12px;">Loading packages...</p>';
+  try{
+    var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/packages');
+    var d=await r.json();
+    if(d.error){body.innerHTML=tabs+'<p style="color:var(--red);font-size:12px;">'+d.error+'</p>';return;}
+    var h=tabs;
+    // Install form
+    h+='<div style="display:flex;gap:4px;margin-bottom:8px;">';
+    h+='<input type="text" id="pkg-install-name" placeholder="package name" style="flex:1;height:26px;font-size:11px;padding:2px 6px;font-family:monospace;">';
+    h+='<button class="act-btn" onclick="pkgInstall()">Install</button>';
+    h+='</div>';
+    h+='<div style="font-size:10px;color:var(--muted);margin-bottom:6px;">'+d.total+' packages installed</div>';
+    // Search
+    h+='<input type="text" id="pkg-search" placeholder="Search packages..." oninput="filterPkgs()" style="height:26px;font-size:11px;padding:2px 6px;margin-bottom:6px;">';
+    h+='<div id="pkg-list" style="max-height:calc(100vh - 260px);overflow-y:auto;">';
+    d.packages.forEach(function(p){
+      h+='<div class="pkg-row" data-name="'+p.name+'" style="display:flex;align-items:center;gap:6px;padding:3px 0;border-bottom:1px solid rgba(30,37,48,.3);font-size:11px;">';
+      h+='<span style="flex:1;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+p.name+'</span>';
+      h+='<span style="color:var(--muted);font-size:10px;flex-shrink:0;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+p.version+'</span>';
+      h+='<button class="act-btn danger" onclick="pkgRemove(\''+p.name+'\')" style="flex-shrink:0;font-size:9px;padding:1px 5px;">Remove</button>';
+      h+='</div>';
+    });
+    h+='</div>';
+    body.innerHTML=h;
+  }catch(e){body.innerHTML=tabs+'<p style="color:var(--red);font-size:12px;">'+e.message+'</p>';}
+}
+function filterPkgs(){
+  var q=document.getElementById('pkg-search').value.toLowerCase();
+  document.querySelectorAll('.pkg-row').forEach(function(r){
+    r.style.display=r.getAttribute('data-name').toLowerCase().indexOf(q)>=0?'flex':'none';
+  });
+}
+async function appLogs(pid){
+  var body=document.getElementById('apps-body');
+  body.innerHTML='<p style="color:var(--muted);font-size:12px;">Loading logs...</p>';
+  var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/apps/'+pid+'/logs?lines=100');
+  var d=await r.json();
+  body.innerHTML='<button class="act-btn" onclick="loadApps()" style="margin-bottom:6px;">&#8592; Back</button>'
+    +'<div style="font-size:10px;color:var(--muted);margin-bottom:4px;">Source: '+(d.source||'unknown')+'</div>'
+    +'<div class="log-view" style="max-height:calc(100vh - 180px);">'+((d.logs||'No logs found').replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</div>';
+}
+async function appRestart(pid){
+  if(!confirm('Restart process '+pid+'? The process will be killed and relaunched.'))return;
+  var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/apps/'+pid+'/restart',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+  var d=await r.json();
+  alert(d.output||d.error||'Done');
+  setTimeout(loadApps,1500);
+}
+async function appStop(pid,force){
+  var msg=force?'KILL (force) process '+pid+'?':'Stop process '+pid+'?';
+  if(!confirm(msg))return;
+  await fetch('/servers/'+encodeURIComponent(SRV)+'/apps/'+pid+'/stop',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({force:force})});
+  setTimeout(loadApps,1000);
+}
+async function pkgInstall(){
+  var name=document.getElementById('pkg-install-name').value.trim();
+  if(!name){alert('Enter package name');return;}
+  if(!confirm('Install package '+name+'?'))return;
+  var body=document.getElementById('apps-body');
+  body.innerHTML='<p style="color:var(--muted);font-size:12px;">Installing '+name+'...</p>';
+  var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/packages/install',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({package:name})});
+  var d=await r.json();
+  body.innerHTML='<button class="act-btn" onclick="loadApps()" style="margin-bottom:6px;">&#8592; Back</button>'
+    +'<div class="log-view">'+((d.output||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</div>';
+}
+async function pkgRemove(name){
+  if(!confirm('Remove package '+name+'?'))return;
+  var body=document.getElementById('apps-body');
+  body.innerHTML='<p style="color:var(--muted);font-size:12px;">Removing '+name+'...</p>';
+  var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/packages/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({package:name})});
+  var d=await r.json();
+  body.innerHTML='<button class="act-btn" onclick="_appsView=\'packages\';loadApps()" style="margin-bottom:6px;">&#8592; Back</button>'
+    +'<div class="log-view">'+((d.output||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</div>';
+}
+
+/* ── Panel resize + fullscreen ── */
+function toggleFullscreen(panelId) {
+  var panel = document.getElementById(panelId);
+  panel.classList.toggle('fullscreen');
+  if (panelId === 'panel-ai') setTimeout(fitAI, 50);
+}
+
+var _resizing = null;
+function startResize(e, panelId) {
+  e.preventDefault();
+  var panel = document.getElementById(panelId);
+  var handle = e.target;
+  handle.classList.add('dragging');
+  panel.classList.remove('fullscreen');
+  panel.style.transition = 'none';
+  _resizing = { panel: panel, handle: handle, startX: e.clientX, startW: panel.offsetWidth };
+
+  function onMove(e) {
+    if (!_resizing) return;
+    var delta = _resizing.startX - e.clientX;
+    var newW = Math.max(300, Math.min(window.innerWidth - 50, _resizing.startW + delta));
+    _resizing.panel.style.width = newW + 'px';
+    if (panelId === 'panel-ai') fitAI();
+  }
+  function onUp() {
+    if (!_resizing) return;
+    _resizing.handle.classList.remove('dragging');
+    _resizing.panel.style.transition = '';
+    _resizing = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    if (panelId === 'panel-ai') fitAI();
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
+
+/* ── AI Terminal (OpenCode) ── */
+var _aiTerm = null, _aiFit = null, _aiSock = null;
+
+var _lastAICols = 0, _lastAIRows = 0, _aiResizeTimer = null;
+function fitAI() {
+  if (!_aiFit || !_aiTerm) return;
+  _aiFit.fit();
+  if (_aiTerm.cols !== _lastAICols || _aiTerm.rows !== _lastAIRows) {
+    _lastAICols = _aiTerm.cols;
+    _lastAIRows = _aiTerm.rows;
+    // Debounce: reconnect after user stops resizing for 300ms
+    if (_aiResizeTimer) clearTimeout(_aiResizeTimer);
+    _aiResizeTimer = setTimeout(function() {
+      _aiTerm.clear();
+      connectAI();
+    }, 300);
+  }
+}
+
+var _aiReady = false;
+
+async function checkAndOpenAI() {
+  try {
+    var r = await fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/status');
+    var d = await r.json();
+    if (d.running && !d.same) {
+      if (!confirm('AI is already running on "'+d.server+'".\n\nSwitch to this server? The other session will be terminated.')) {
+        closePanel();
+        return;
+      }
+      await fetch('/ai-session/switch', {method:'POST'});
+      _aiReady = false;
+      _aiDataBound = false;
+      if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
+    }
+  } catch(e) {}
+  initAITerminal();
+}
+
+function initAITerminal() {
+  var panel = document.getElementById('panel-ai');
+
+  if (_aiTerm && _aiReady) {
+    // Already initialized - refit and send resize
+    fitAI();
+    return;
+  }
+
+  if (!_aiTerm) {
+    _aiTerm = new Terminal({
+      cursorBlink: true, cursorStyle: 'bar', fontSize: 13,
+      fontFamily: '"JetBrains Mono","Fira Code","SF Mono","Consolas",monospace',
+      lineHeight: 1.2, scrollback: 10000,
+      theme: {
+        background:'#0a0e14',foreground:'#b8c4d4',cursor:'#3b82f6',cursorAccent:'#0a0e14',
+        selectionBackground:'rgba(59,130,246,.2)',
+        black:'#1a2028',red:'#ef4444',green:'#22c55e',yellow:'#eab308',blue:'#3b82f6',
+        magenta:'#a78bfa',cyan:'#22d3ee',white:'#b8c4d4',
+        brightBlack:'#5e6e82',brightRed:'#fca5a5',brightGreen:'#4ade80',brightYellow:'#fde047',
+        brightBlue:'#60a5fa',brightMagenta:'#c4b5fd',brightCyan:'#67e8f9',brightWhite:'#e2e8f0'
+      }
+    });
+    _aiFit = new FitAddon.FitAddon();
+    _aiTerm.loadAddon(_aiFit);
+    _aiTerm.open(document.getElementById('ai-term-container'));
+    new ResizeObserver(fitAI).observe(panel);
+  }
+
+  // Wait for the slide-in transition to finish BEFORE connecting
+  // so clientWidth is correct when we send the first RESIZE
+  function afterTransition() {
+    panel.removeEventListener('transitionend', afterTransition);
+    _aiFit.fit();
+    _aiReady = true;
+    if (!_aiSock || _aiSock.readyState !== WebSocket.OPEN) {
+      connectAI();
+    } else {
+      fitAI();
+    }
+  }
+  panel.addEventListener('transitionend', afterTransition);
+  // Fallback in case transitionend doesn't fire (already open, no transition)
+  setTimeout(function() {
+    if (!_aiReady) afterTransition();
+  }, 400);
+}
+
+var _aiDataBound = false;
+function connectAI() {
+  if (_aiSock) try { _aiSock.close(); } catch(_){}
+  var proto = location.protocol==='https:'?'wss':'ws';
+  _aiSock = new WebSocket(proto+'://'+location.host+'/ws/ai-terminal/'+encodeURIComponent(SRV));
+  _aiSock.binaryType = 'arraybuffer';
+  _aiSock.onopen = function(){
+    var cols = _aiTerm ? _aiTerm.cols : 80;
+    var rows = _aiTerm ? _aiTerm.rows : 24;
+    _aiSock.send('RESIZE:'+Math.max(cols,40)+':'+Math.max(rows,10));
+    _setAIDot(true);
+  };
+  _aiSock.onmessage = function(e){
+    try{_aiTerm.write(typeof e.data==='string'?e.data:new TextDecoder().decode(e.data));}catch(_){}
+  };
+  _aiSock.onclose = function(){
+    if(_aiTerm) _aiTerm.write('\r\n\x1b[2m--- AI session ended ---\x1b[0m\r\n');
+  };
+  // Only bind onData once
+  if (!_aiDataBound) {
+    _aiTerm.onData(function(d){ try{_aiSock.send(d);}catch(_){} });
+    _aiDataBound = true;
+  }
+}
+
+function reconnectAI() {
+  if(_aiTerm) _aiTerm.clear();
+  connectAI();
+}
+
+async function newAISession() {
+  if(!confirm('Start a fresh AI session? Previous conversation will not be resumable.')) return;
+  await fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/new', {method:'POST'});
+  _aiReady = false;
+  _aiDataBound = false;
+  if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
+  initAITerminal();
+}
+
+async function dkPull(){
+  var img=document.getElementById('dk-pull-img').value.trim();
+  if(!img){alert('Enter image name');return;}
+  if(!confirm('Pull image '+img+'?'))return;
+  var body=document.getElementById('dk-body');
+  body.innerHTML='<p style="color:var(--muted);font-size:12px;">Pulling '+img+'...</p>';
+  var r=await fetch('/servers/'+encodeURIComponent(SRV)+'/docker/pull',{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:img})});
+  var d=await r.json();
+  body.innerHTML='<button class="act-btn" onclick="loadDocker()" style="margin-bottom:6px;">&#8592; Back</button>'
+    +'<div class="log-view">'+((d.output||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</div>';
+}
+</script>
+{% endblock %}
