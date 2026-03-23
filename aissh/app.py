@@ -1287,21 +1287,24 @@ def ws_ai_terminal(ws, name):
     )
     os.close(slave_fd)
 
+    import queue as _queue
+
+    out_q = _queue.Queue()
     stop = threading.Event()
 
     def _pty_reader():
-        """Read from PTY using raw file descriptor polling."""
+        """Read from PTY in a real OS thread, put data into a queue."""
         import select as _sel
 
+        os.set_blocking(master_fd, False)
         while not stop.is_set():
             try:
-                # Use real select (not gevent-patched) on the PTY fd
                 r, _, _ = _sel.select([master_fd], [], [], 0.05)
                 if r:
                     data = os.read(master_fd, 16384)
                     if not data:
                         break
-                    ws.send(data.decode(errors="replace"))
+                    out_q.put(data)
             except (OSError, ValueError):
                 break
             if proc.poll() is not None:
@@ -1311,20 +1314,33 @@ def ws_ai_terminal(ws, name):
                         data = os.read(master_fd, 16384)
                         if not data:
                             break
-                        ws.send(data.decode(errors="replace"))
+                        out_q.put(data)
                 except OSError:
                     pass
                 break
-        stop.set()
-        try:
-            ws.close()
-        except Exception:
-            pass
+        out_q.put(None)
 
-    # Use a real OS thread (not gevent greenlet) so select() works on the PTY fd
+    # Real OS thread (bypasses gevent) for PTY I/O
     import _thread
 
     _thread.start_new_thread(_pty_reader, ())
+
+    # Greenlet-safe sender: drains queue and writes to WebSocket
+    def _send_loop():
+        while not stop.is_set():
+            try:
+                chunk = out_q.get(timeout=0.05)
+                if chunk is None:
+                    break
+                ws.send(chunk.decode(errors="replace"))
+            except _queue.Empty:
+                pass
+            except Exception:
+                break
+        stop.set()
+
+    sender = threading.Thread(target=_send_loop, daemon=True)
+    sender.start()
 
     try:
         while not stop.is_set():
@@ -1360,11 +1376,6 @@ def ws_ai_terminal(ws, name):
                 proc.kill()
             except Exception:
                 pass
-        stop.set()
-        try:
-            ws.close()
-        except Exception:
-            pass
 
     t = threading.Thread(target=_pty_to_ws, daemon=True)
     t.start()
