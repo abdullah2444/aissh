@@ -1243,35 +1243,8 @@ def _find_ai_cli() -> str | None:
 _active_ai_sessions: dict = {}
 
 
-# Last opencode session ID per (uid, server_name) for resume
-_last_ai_session_ids: dict = {}
-
-
-def _save_last_session_id(uid, name):
-    """Capture the most recent opencode session ID before killing."""
-    ai_cli = _find_ai_cli()
-    if not ai_cli:
-        return
-    try:
-        result = subprocess.run(
-            [ai_cli, "session", "list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        for line in result.stdout.strip().splitlines():
-            line = line.strip()
-            if line.startswith("ses_"):
-                _last_ai_session_ids[(uid, name)] = line.split()[0]
-                return
-    except Exception:
-        pass
-
-
 def _kill_ai_session(uid, name):
     """Kill the tmux AI session and orphaned processes for a given user+server."""
-    # Save session ID before killing so we can resume later
-    _save_last_session_id(uid, name)
     safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     session = f"aissh_ai_{uid}_{safe_name}"
     work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session)
@@ -1392,18 +1365,14 @@ Examples:
     with open(os.path.join(work_dir, "CLAUDE.md"), "w") as f:
         f.write(claude_md)
 
-    # Build env
     cli_dir = os.path.dirname(ai_cli)
     path_env = cli_dir + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
 
-    # Check if we have a saved session to resume
-    saved_id = _last_ai_session_ids.get((uid, name))
-    if saved_id:
-        launch_cmd = f"export PATH={path_env} && {ai_cli} --session {saved_id}"
-    else:
-        launch_cmd = f"export PATH={path_env} && {ai_cli}"
+    # Always use --continue so it resumes the last session in this HOME.
+    # Each server has its own HOME (work_dir) so sessions never cross.
+    launch_cmd = f"export HOME={work_dir} PATH={path_env} && {ai_cli} --continue"
 
-    # Create tmux session running opencode in the work directory
+    # Create tmux session
     subprocess.run(
         [
             "tmux",
@@ -1415,7 +1384,12 @@ Examples:
             work_dir,
             launch_cmd,
         ],
-        env={**os.environ, "PATH": path_env, "TERM": "xterm-256color"},
+        env={
+            **os.environ,
+            "HOME": work_dir,
+            "PATH": path_env,
+            "TERM": "xterm-256color",
+        },
         timeout=5,
     )
     # Hide tmux status bar
@@ -1608,13 +1582,11 @@ def ai_session_status(name):
     """Check if AI is running on this or another server."""
     uid = current_user.id
     active = _active_ai_sessions.get(uid)
-    has_saved = (uid, name) in _last_ai_session_ids
     return jsonify(
         {
             "running": bool(active),
             "server": active or "",
             "same": active == name,
-            "has_saved_session": has_saved,
         }
     )
 
@@ -1631,11 +1603,9 @@ def ai_session_reset(name):
 @app.route("/servers/<name>/ai-session/new", methods=["POST"])
 @login_required
 def ai_session_new(name):
-    """Kill session AND clear saved session ID so next open starts fresh."""
+    """Kill session AND wipe the isolated HOME so next open starts completely fresh."""
     uid = current_user.id
     _kill_ai_session(uid, name)
-    _last_ai_session_ids.pop((uid, name), None)
-    # Also delete work dir for a truly fresh start
     safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     work_dir = os.path.join(
         os.path.expanduser("~"), ".aissh_ai_sessions", f"aissh_ai_{uid}_{safe_name}"
