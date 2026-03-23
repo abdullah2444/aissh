@@ -4,7 +4,6 @@ import json
 import os
 import functools
 import re
-import requests as _requests
 import shutil
 import subprocess
 import threading
@@ -2720,6 +2719,37 @@ def _do_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+class _DoResponse:
+    """Minimal response object matching requests.Response interface."""
+
+    def __init__(self, status_code, data):
+        self.status_code = status_code
+        self._data = data
+
+    def json(self):
+        return (
+            json.loads(self._data)
+            if isinstance(self._data, (str, bytes))
+            else self._data
+        )
+
+
+def _do_request(method, url, headers, json_data=None, timeout=10):
+    """HTTP request using urllib (gevent-safe, no requests dependency)."""
+    import urllib.request
+    import urllib.error
+
+    body = json.dumps(json_data).encode() if json_data else None
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return _DoResponse(resp.status, resp.read().decode())
+    except urllib.error.HTTPError as e:
+        return _DoResponse(e.code, e.read().decode() if e.fp else "{}")
+    except Exception:
+        return _DoResponse(500, "{}")
+
+
 @app.route("/droplets")
 @login_required
 def droplets_page():
@@ -2735,44 +2765,28 @@ def droplets_page():
     if token:
         try:
             # Fetch droplets
-            r = _requests.get(
-                f"{_DO_API}/droplets?per_page=200",
-                headers=_do_headers(token),
-                timeout=10,
-            )
+            r = _do_request('GET', f"{_DO_API}/droplets?per_page=200", _do_headers(token), timeout=10)
             if r.status_code == 200:
                 droplets = r.json().get("droplets", [])
             else:
                 error = f"Failed to fetch droplets: {r.status_code}"
 
             # Fetch regions, sizes, images, vpcs in parallel-ish
-            rr = _requests.get(
-                f"{_DO_API}/regions?per_page=200",
-                headers=_do_headers(token),
-                timeout=10,
-            )
+            rr = _do_request('GET', f"{_DO_API}/regions?per_page=200", _do_headers(token), timeout=10)
             if rr.status_code == 200:
                 regions = [
                     r for r in rr.json().get("regions", []) if r.get("available")
                 ]
 
-            rs = _requests.get(
-                f"{_DO_API}/sizes?per_page=200", headers=_do_headers(token), timeout=10
-            )
+            rs = _do_request('GET', f"{_DO_API}/sizes?per_page=200", _do_headers(token), timeout=10)
             if rs.status_code == 200:
                 sizes = rs.json().get("sizes", [])
 
-            ri = _requests.get(
-                f"{_DO_API}/images?type=distribution&per_page=200",
-                headers=_do_headers(token),
-                timeout=10,
-            )
+            ri = _do_request('GET', f"{_DO_API}/images?type=distribution&per_page=200", _do_headers(token), timeout=10)
             if ri.status_code == 200:
                 images = ri.json().get("images", [])
 
-            rv = _requests.get(
-                f"{_DO_API}/vpcs?per_page=200", headers=_do_headers(token), timeout=10
-            )
+            rv = _do_request('GET', f"{_DO_API}/vpcs?per_page=200", _do_headers(token), timeout=10)
             if rv.status_code == 200:
                 vpcs = rv.json().get("vpcs", [])
 
@@ -2824,9 +2838,7 @@ def droplets_create():
         return redirect(url_for("droplets_page"))
 
     try:
-        r = _requests.post(
-            f"{_DO_API}/droplets", headers=_do_headers(token), json=payload, timeout=15
-        )
+        r = _do_request('POST', f"{_DO_API}/droplets", _do_headers(token), json_data=payload, timeout=15)
         if r.status_code in (201, 202):
             d = r.json().get("droplet", {})
             flash(
@@ -2852,9 +2864,7 @@ def droplets_delete(droplet_id):
         return redirect(url_for("settings"))
 
     try:
-        r = _requests.delete(
-            f"{_DO_API}/droplets/{droplet_id}", headers=_do_headers(token), timeout=10
-        )
+        r = _do_request('DELETE', f"{_DO_API}/droplets/{droplet_id}", _do_headers(token), timeout=10)
         if r.status_code == 204:
             flash("Droplet deleted.", "success")
         else:
@@ -2877,9 +2887,7 @@ def droplets_add_server(droplet_id):
         return redirect(url_for("droplets_page"))
 
     try:
-        r = _requests.get(
-            f"{_DO_API}/droplets/{droplet_id}", headers=_do_headers(token), timeout=10
-        )
+        r = _do_request('GET', f"{_DO_API}/droplets/{droplet_id}", _do_headers(token), timeout=10)
         if r.status_code != 200:
             flash("Could not fetch droplet info.", "error")
             return redirect(url_for("droplets_page"))
@@ -2930,12 +2938,7 @@ def droplets_reboot(droplet_id):
         flash("DigitalOcean API token not configured.", "error")
         return redirect(url_for("droplets_page"))
     try:
-        r = _requests.post(
-            f"{_DO_API}/droplets/{droplet_id}/actions",
-            headers=_do_headers(token),
-            json={"type": "reboot"},
-            timeout=10,
-        )
+        r = _do_request('POST', f"{_DO_API}/droplets/{droplet_id}/actions", _do_headers(token), json_data={"type": "reboot"}, timeout=10)
         if r.status_code in (200, 201):
             flash("Reboot initiated.", "success")
         else:
