@@ -20,6 +20,9 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
+# ── Stop old service if running ──
+systemctl stop aissh 2>/dev/null || true
+
 # ── Detect package manager ──
 if command -v apt-get >/dev/null 2>&1; then
   PKG="apt"
@@ -71,7 +74,7 @@ Description=AISSH - Server Manager
 After=network.target
 
 [Service]
-Type=notify
+Type=simple
 User=root
 WorkingDirectory=$AISSH_DIR
 Environment="PATH=$VENV_DIR/bin:/usr/local/bin:/usr/bin:/bin"

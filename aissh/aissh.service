@@ -4,7 +4,7 @@ After=network.target
 Wants=network-online.target
 
 [Service]
-Type=notify
+Type=simple
 User=root
 Group=root
 WorkingDirectory=/root/aissh
