@@ -44,10 +44,10 @@ else
   echo "[!] No supported package manager found (apt/yum/dnf)"
   exit 1
 fi
-echo "[1/7] Package manager: $PKG"
+echo "[1/6] Package manager: $PKG"
 
 # ── Install system dependencies ──
-echo "[2/7] Installing system dependencies..."
+echo "[2/6] Installing system dependencies..."
 if [ "$PKG" = "apt" ]; then
   apt-get update -qq >/dev/null 2>&1
   apt-get install -y -qq python3 python3-venv python3-pip nginx sshpass rsync >/dev/null 2>&1
@@ -59,7 +59,7 @@ fi
 echo "  Done."
 
 # ── Create venv and install Python deps ──
-echo "[3/7] Setting up Python environment..."
+echo "[3/6] Setting up Python environment..."
 mkdir -p "$LOG_DIR"
 
 if [ ! -d "$VENV_DIR" ]; then
@@ -82,21 +82,8 @@ if [ "$RESET_ADMIN" = true ]; then
   rm -f "$AISSH_DIR/users.json"
 fi
 
-# ── Install OpenCode CLI ──
-if ! command -v opencode >/dev/null 2>&1; then
-  echo "  Installing OpenCode CLI..."
-  curl -fsSL https://opencode.ai/install | bash >/dev/null 2>&1
-  if command -v opencode >/dev/null 2>&1; then
-    echo "  OpenCode installed."
-  else
-    echo "  OpenCode install failed (optional, AI tab won't work)."
-  fi
-else
-  echo "  OpenCode already installed."
-fi
-
 # ── Install systemd service ──
-echo "[4/7] Installing systemd service..."
+echo "[4/6] Installing systemd service..."
 cat > /etc/systemd/system/aissh.service <<EOF
 [Unit]
 Description=AISSH - Server Manager
@@ -125,7 +112,7 @@ systemctl enable aissh >/dev/null 2>&1
 echo "  Done."
 
 # ── Configure Nginx ──
-echo "[5/7] Configuring Nginx..."
+echo "[5/6] Configuring Nginx..."
 cat > /etc/nginx/sites-available/aissh <<'NGINX'
 upstream aissh_backend {
     server 127.0.0.1:5002;
@@ -182,13 +169,13 @@ else
 fi
 
 # ── Start everything ──
-echo "[6/7] Starting services..."
+echo "[6/6] Starting services..."
 systemctl restart aissh
 systemctl restart nginx
 sleep 2
 
 # ── Verify ──
-echo "[7/7] Verifying..."
+echo ""
 if systemctl is-active --quiet aissh; then
   echo "  AISSH:  RUNNING"
 else

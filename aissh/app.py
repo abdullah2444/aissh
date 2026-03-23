@@ -1247,10 +1247,27 @@ def ws_ai_terminal(ws, name):
     ssh_target = f"{user}@{host}" + (f" -p {port}" if port != 22 else "")
 
     # Find which AI CLI is available locally
+    # Check common install paths since systemd PATH is limited
+    search_paths = [
+        os.path.expanduser("~/.opencode/bin"),
+        os.path.expanduser("~/.local/bin"),
+        "/usr/local/bin",
+        "/usr/bin",
+    ]
     ai_cli = None
     for cmd in ["opencode", "claude"]:
-        if shutil.which(cmd):
-            ai_cli = cmd
+        # Check PATH first
+        found = shutil.which(cmd)
+        if found:
+            ai_cli = found
+            break
+        # Then check common locations
+        for p in search_paths:
+            full = os.path.join(p, cmd)
+            if os.path.isfile(full) and os.access(full, os.X_OK):
+                ai_cli = full
+                break
+        if ai_cli:
             break
 
     if not ai_cli:
@@ -1262,12 +1279,15 @@ def ws_ai_terminal(ws, name):
         return
 
     # Spawn a local PTY running the AI CLI
-    # Set AISSH_SSH_TARGET so the AI knows which server to manage
     env = os.environ.copy()
+    # Ensure the AI CLI's own directory is in PATH
+    cli_dir = os.path.dirname(ai_cli)
+    env["PATH"] = cli_dir + ":" + env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     env["AISSH_SSH_HOST"] = host
     env["AISSH_SSH_PORT"] = str(port)
     env["AISSH_SSH_USER"] = user
     env["TERM"] = "xterm-256color"
+    env["HOME"] = os.path.expanduser("~")
 
     master_fd, slave_fd = _pty.openpty()
     proc = subprocess.Popen(
