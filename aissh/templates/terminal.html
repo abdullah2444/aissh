@@ -750,34 +750,54 @@ function fitAI() {
     _aiSock.send('RESIZE:' + _aiTerm.cols + ':' + _aiTerm.rows);
 }
 
+var _aiReady = false;
+
 function initAITerminal() {
-  if (_aiTerm) {
-    // Already initialized - just refit after panel opens
-    setTimeout(fitAI, 250);
+  var panel = document.getElementById('panel-ai');
+
+  if (_aiTerm && _aiReady) {
+    // Already initialized - refit and send resize
+    fitAI();
     return;
   }
-  _aiTerm = new Terminal({
-    cursorBlink: true, cursorStyle: 'bar', fontSize: 13,
-    fontFamily: '"JetBrains Mono","Fira Code","SF Mono","Consolas",monospace',
-    lineHeight: 1.2, scrollback: 10000,
-    theme: {
-      background:'#0a0e14',foreground:'#b8c4d4',cursor:'#3b82f6',cursorAccent:'#0a0e14',
-      selectionBackground:'rgba(59,130,246,.2)',
-      black:'#1a2028',red:'#ef4444',green:'#22c55e',yellow:'#eab308',blue:'#3b82f6',
-      magenta:'#a78bfa',cyan:'#22d3ee',white:'#b8c4d4',
-      brightBlack:'#5e6e82',brightRed:'#fca5a5',brightGreen:'#4ade80',brightYellow:'#fde047',
-      brightBlue:'#60a5fa',brightMagenta:'#c4b5fd',brightCyan:'#67e8f9',brightWhite:'#e2e8f0'
-    }
-  });
-  _aiFit = new FitAddon.FitAddon();
-  _aiTerm.loadAddon(_aiFit);
-  _aiTerm.open(document.getElementById('ai-term-container'));
-  // Wait for slide-in transition to finish before first fit
-  setTimeout(fitAI, 300);
-  connectAI();
 
-  // Watch the panel element itself for size changes (not just the container)
-  new ResizeObserver(fitAI).observe(document.getElementById('panel-ai'));
+  if (!_aiTerm) {
+    _aiTerm = new Terminal({
+      cursorBlink: true, cursorStyle: 'bar', fontSize: 13,
+      fontFamily: '"JetBrains Mono","Fira Code","SF Mono","Consolas",monospace',
+      lineHeight: 1.2, scrollback: 10000,
+      theme: {
+        background:'#0a0e14',foreground:'#b8c4d4',cursor:'#3b82f6',cursorAccent:'#0a0e14',
+        selectionBackground:'rgba(59,130,246,.2)',
+        black:'#1a2028',red:'#ef4444',green:'#22c55e',yellow:'#eab308',blue:'#3b82f6',
+        magenta:'#a78bfa',cyan:'#22d3ee',white:'#b8c4d4',
+        brightBlack:'#5e6e82',brightRed:'#fca5a5',brightGreen:'#4ade80',brightYellow:'#fde047',
+        brightBlue:'#60a5fa',brightMagenta:'#c4b5fd',brightCyan:'#67e8f9',brightWhite:'#e2e8f0'
+      }
+    });
+    _aiFit = new FitAddon.FitAddon();
+    _aiTerm.loadAddon(_aiFit);
+    _aiTerm.open(document.getElementById('ai-term-container'));
+    new ResizeObserver(fitAI).observe(panel);
+  }
+
+  // Wait for the slide-in transition to finish BEFORE connecting
+  // so clientWidth is correct when we send the first RESIZE
+  function afterTransition() {
+    panel.removeEventListener('transitionend', afterTransition);
+    _aiFit.fit();
+    _aiReady = true;
+    if (!_aiSock || _aiSock.readyState !== WebSocket.OPEN) {
+      connectAI();
+    } else {
+      fitAI();
+    }
+  }
+  panel.addEventListener('transitionend', afterTransition);
+  // Fallback in case transitionend doesn't fire (already open, no transition)
+  setTimeout(function() {
+    if (!_aiReady) afterTransition();
+  }, 400);
 }
 
 function connectAI() {
