@@ -6,7 +6,6 @@ import functools
 import re
 import requests as _requests
 import shutil
-import socket
 import subprocess
 import threading
 import time as _time
@@ -40,134 +39,6 @@ from dotenv import load_dotenv
 import paramiko
 
 load_dotenv()
-
-# ---------------------------------------------------------------------------
-# TTYd Terminal Integration
-# ---------------------------------------------------------------------------
-
-# Port range for ttyd instances (one per server)
-TTYD_BASE_PORT = 9000
-_ttyd_processes = {}  # (uid, server_name) -> subprocess.Popen
-
-
-def _get_free_port():
-    """Get a free port on the system."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        s.listen(1)
-        port = s.getsockname()[1]
-    return port
-
-
-def start_ttyd_for_server(uid: str, server: dict) -> int:
-    """Start a ttyd instance for SSH connection to a server. Returns port number."""
-    key = (uid, server["name"])
-
-    # Check if already running
-    if key in _ttyd_processes:
-        proc = _ttyd_processes[key]
-        if proc.poll() is None:  # Still running
-            # Find the port from the process
-            return _ttyd_ports.get(key, 0)
-        else:
-            # Clean up dead process
-            del _ttyd_processes[key]
-
-    # Get a free port
-    port = _get_free_port()
-
-    # Build SSH command
-    ssh_cmd = ["ssh"]
-    if server.get("port", 22) != 22:
-        ssh_cmd.extend(["-p", str(server["port"])])
-    if server.get("pem_key"):
-        # Write key to temp file
-        key_file = f"/tmp/ttyd_key_{uid}_{server['name']}.pem"
-        with open(key_file, "w") as f:
-            f.write(server["pem_key"])
-        os.chmod(key_file, 0o600)
-        ssh_cmd.extend(["-i", key_file])
-
-    ssh_cmd.extend(
-        [
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            f"{server['user']}@{server['host']}",
-            "--",
-            "exec $SHELL -l",
-        ]
-    )
-
-    # Start ttyd with SSH command
-    cmd = [
-        "ttyd",
-        "-p",
-        str(port),
-        "-c",
-        f"admin:{server.get('password', 'admin')}",  # Basic auth
-        "-t",
-        "fontSize=14",
-        "-t",
-        "fontFamily=JetBrains Mono, Fira Code, monospace",
-        "-t",
-        'theme={"background": "#1e1e1e", "foreground": "#d4d4d4"}',
-        "-O",  # Check origin
-        "--once",  # One client only
-    ] + ssh_cmd
-
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    _ttyd_processes[key] = proc
-    _ttyd_ports[key] = port
-
-    # Wait a moment for ttyd to start
-    _time.sleep(0.5)
-
-    return port
-
-
-def stop_ttyd_for_server(uid: str, server_name: str):
-    """Stop ttyd instance for a server."""
-    key = (uid, server_name)
-    if key in _ttyd_processes:
-        proc = _ttyd_processes[key]
-        proc.terminate()
-        try:
-            proc.wait(timeout=2)
-        except (subprocess.TimeoutExpired, OSError):
-            proc.kill()
-        del _ttyd_processes[key]
-        if key in _ttyd_ports:
-            del _ttyd_ports[key]
-
-
-def cleanup_all_ttyd():
-    """Stop all ttyd processes."""
-    for key, proc in list(_ttyd_processes.items()):
-        proc.terminate()
-        try:
-            proc.wait(timeout=2)
-        except (subprocess.TimeoutExpired, OSError):
-            proc.kill()
-        del _ttyd_processes[key]
-        if key in _ttyd_ports:
-            del _ttyd_ports[key]
-
-
-def cleanup_all_ttyd():
-    """Stop all ttyd processes."""
-    for key, proc in list(_ttyd_processes.items()):
-        proc.terminate()
-        try:
-            proc.wait(timeout=2)
-        except:
-            proc.kill()
-    _ttyd_processes.clear()
-    _ttyd_ports.clear()
-
-
-_ttyd_ports = {}  # (uid, server_name) -> port
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +103,21 @@ def _get_stats_conn(user_id: str, server: dict) -> paramiko.SSHClient:
     _ssh_connect(client, server, timeout=5)
     _stats_pool[key] = client
     return client
+
+
+def _ssh_exec(uid: str, server: dict, cmd: str, timeout: int = 15) -> dict:
+    """Run a command on a server, return {stdout, stderr, exit_code}."""
+    try:
+        client = _get_stats_conn(uid, server)
+        _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
+        exit_code = stdout.channel.recv_exit_status()
+        return {
+            "stdout": stdout.read().decode("utf-8", errors="replace").strip(),
+            "stderr": stderr.read().decode("utf-8", errors="replace").strip(),
+            "exit_code": exit_code,
+        }
+    except Exception as e:
+        return {"stdout": "", "stderr": str(e), "exit_code": -1}
 
 
 # ---------------------------------------------------------------------------
@@ -335,25 +221,6 @@ def _stop_stats_stream(uid: str, name: str):
     _stats_cache.pop(key, None)
 
 
-# ---------------------------------------------------------------------------
-# Claude CLI session tracking
-# ---------------------------------------------------------------------------
-_cli_sessions: dict = {}  # (uid, server_name) → session_id
-
-
-def load_session_id(uid: str, name: str) -> str:
-    return _cli_sessions.get((uid, name), "")
-
-
-def save_session_id(uid: str, name: str, sid: str):
-    if sid:
-        _cli_sessions[(uid, name)] = sid
-
-
-def clear_session_id(uid: str, name: str):
-    _cli_sessions.pop((uid, name), None)
-
-
 BASE = Path(__file__).parent
 USERS_FILE = BASE / "users.json"
 APP_SETTINGS_FILE = BASE / "app_settings.json"
@@ -365,12 +232,6 @@ MEMORY_DIR = BASE / "memories"
 CHATS_DIR.mkdir(exist_ok=True)
 MEMORY_DIR.mkdir(exist_ok=True)
 DATA_DIR.mkdir(exist_ok=True)
-
-# ---------------------------------------------------------------------------
-# Background task tracking
-# ---------------------------------------------------------------------------
-_bg_tasks: dict = {}  # (uid, server_name, task_id) -> task_info dict
-_bg_tasks_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -672,44 +533,6 @@ def save_provider(uid: str, p: str):
     _save_user_settings(uid, s)
 
 
-def get_provider_key(uid: str, provider_id: str) -> str:
-    """Get the API key for any provider."""
-    prov = AI_PROVIDERS.get(provider_id)
-    if not prov:
-        return ""
-    return _load_user_settings(uid).get(prov["key_setting"], "")
-
-
-def save_provider_key(uid: str, provider_id: str, key: str):
-    """Save the API key for any provider."""
-    prov = AI_PROVIDERS.get(provider_id)
-    if not prov:
-        return
-    s = _load_user_settings(uid)
-    s[prov["key_setting"]] = key
-    _save_user_settings(uid, s)
-
-
-def get_custom_base_url(uid: str) -> str:
-    return _load_user_settings(uid).get("custom_base_url", "")
-
-
-def save_custom_base_url(uid: str, url: str):
-    s = _load_user_settings(uid)
-    s["custom_base_url"] = url
-    _save_user_settings(uid, s)
-
-
-def get_custom_model(uid: str) -> str:
-    return _load_user_settings(uid).get("custom_model_name", "")
-
-
-def save_custom_model(uid: str, model: str):
-    s = _load_user_settings(uid)
-    s["custom_model_name"] = model
-    _save_user_settings(uid, s)
-
-
 # ---------------------------------------------------------------------------
 # AI Provider Registry
 # ---------------------------------------------------------------------------
@@ -800,7 +623,6 @@ AI_PROVIDERS = {
 }
 
 DEFAULT_MODEL = "claude-sonnet-4-6-20250514"
-DEFAULT_PROVIDER = "anthropic"
 
 
 # Flat list for settings UI
@@ -865,12 +687,6 @@ def load_history(uid: str, name: str) -> list:
         return json.loads(f.read_text())
     except Exception:
         return []
-
-
-def save_history(uid: str, name: str, history: list):
-    f = _chat_file(uid, name)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(history, ensure_ascii=False))
 
 
 def clear_history(uid: str, name: str):
@@ -1024,7 +840,6 @@ def servers_delete(name):
     servers = [s for s in load_servers(uid) if s["name"] != name]
     save_servers(uid, servers)
     clear_history(uid, name)
-    clear_session_id(uid, name)
     # Clean up stats stream and cached connections for this server
     key = (uid, name)
     with _stats_lock:
@@ -1092,7 +907,6 @@ def servers_edit(name):
         save_servers(uid, servers)
         if new_name != name:
             clear_history(uid, name)
-            clear_session_id(uid, name)
         flash(f"Server '{new_name}' updated.", "success")
         return redirect(url_for("index"))
 
@@ -1135,12 +949,6 @@ def multi_terminal():
         servers=servers,
         selected=selected,
     )
-
-
-@app.route("/chat/<name>/history")
-@login_required
-def chat_history_json(name):
-    return jsonify({"history": load_history(current_user.id, name)})
 
 
 # ---------------------------------------------------------------------------
@@ -2053,6 +1861,16 @@ def docker_pull(name):
     )
 
 
+_SNAP_DIR = "~/.aissh_snapshots"
+_SNAP_TS_RE = re.compile(r"^\d{8}_\d{6}$")
+
+
+def _snap_cmd(uid: str, server: dict, cmd: str, timeout: int = 30) -> tuple:
+    client = _get_stats_conn(uid, server)
+    _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
+    return stdout.read().decode().strip(), stderr.read().decode().strip()
+
+
 @app.route("/chat/<name>/snapshots")
 @login_required
 def list_snapshots(name):
@@ -2157,9 +1975,6 @@ def delete_snapshot(name, ts):
         return jsonify({"ok": "ok" in out})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-_pending_uploads: dict = {}  # upload_id → attachment dict
 
 
 # ---------------------------------------------------------------------------
@@ -2625,120 +2440,6 @@ def _migrate_packages(ssh_src, ssh_dst, yield_log):
         yield_log("warn", f"pip migration failed: {e}")
 
 
-@app.route("/chat/<name>/upload", methods=["POST"])
-@login_required
-def chat_upload(name):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found."}), 404
-
-    file_obj = request.files.get("file")
-    if not file_obj or not file_obj.filename:
-        return jsonify({"error": "No file provided."}), 400
-
-    filename = file_obj.filename
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    image_exts = {"jpg", "jpeg", "png", "gif", "webp"}
-    raw = file_obj.read()
-
-    if ext == "zip":
-        try:
-            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                items = [i for i in zf.infolist() if not i.is_dir()]
-                if not items:
-                    return jsonify({"error": "Zip contains no files."}), 400
-
-                # Upload all files directly to the SSH server
-                upload_dir = f"/tmp/aissh_upload_{uuid.uuid4().hex[:10]}"
-                client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                _ssh_connect(client, server, timeout=10)
-                client.exec_command(f"mkdir -p '{upload_dir}'")
-                sftp = client.open_sftp()
-                uploaded = []
-                skipped = []
-                for item in items:
-                    dest = f"{upload_dir}/{item.filename}"
-                    parent = dest.rsplit("/", 1)[0]
-                    client.exec_command(f"mkdir -p '{parent}'")
-                    _time.sleep(0.02)
-                    try:
-                        sftp.putfo(io.BytesIO(zf.read(item.filename)), dest)
-                        uploaded.append(item.filename)
-                    except Exception:
-                        skipped.append(item.filename)
-                sftp.close()
-                client.close()
-
-        except zipfile.BadZipFile:
-            return jsonify({"error": "Invalid or corrupted zip file."}), 400
-        except Exception as e:
-            return jsonify({"error": f"Upload to server failed: {e}"}), 500
-
-        if not uploaded:
-            return jsonify({"error": "No files could be uploaded to the server."}), 500
-
-        file_tree = "\n".join(f"  {f}" for f in uploaded)
-        skip_note = f"\n\nSkipped (unreadable): {', '.join(skipped)}" if skipped else ""
-        content = (
-            f"The user uploaded a zip file '{filename}' which has been extracted to "
-            f"`{upload_dir}` on the server.\n\nFiles ({len(uploaded)}):\n{file_tree}{skip_note}\n\n"
-            f"You can explore and work with these files using SSH commands (ls, cat, etc.)."
-        )
-        upload_id = str(uuid.uuid4())
-        _pending_uploads[upload_id] = [
-            {"type": "text", "filename": filename, "content": content}
-        ]
-        return jsonify(
-            {
-                "upload_id": upload_id,
-                "filename": filename,
-                "count": len(uploaded),
-                "server_path": upload_dir,
-            }
-        )
-
-    if ext in image_exts:
-        media_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
-        attachment = {
-            "type": "image",
-            "filename": filename,
-            "media_type": media_type,
-            "data": base64.b64encode(raw).decode(),
-        }
-    else:
-        try:
-            content = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            return jsonify({"error": f"'{filename}' is not a readable text file."}), 400
-        if len(content) > 300_000:
-            content = content[:300_000] + "\n...[truncated at 300 KB]"
-        attachment = {"type": "text", "filename": filename, "content": content}
-
-    upload_id = str(uuid.uuid4())
-    _pending_uploads[upload_id] = attachment
-    return jsonify({"upload_id": upload_id, "filename": filename})
-
-
-@app.route("/chat/<name>", methods=["POST"])
-@login_required
-def chat_send(name):
-    if CHAT_DISABLED:
-        return jsonify(
-            {"error": "Chat interface is disabled. Use terminal access only."}
-        ), 403
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found."}), 404
-
-    data = request.get_json() or {}
-    user_message = data.get("message", "").strip()
-    if not user_message:
-        return jsonify({"error": "Empty message."}), 400
-
-
 @app.route("/chat/<name>/stats")
 @login_required
 def chat_stats(name):
@@ -2755,214 +2456,9 @@ def chat_stats(name):
     return jsonify({"error": "Collecting stats..."}), 202
 
 
-@app.route("/chat/<name>/clear", methods=["POST"])
-@login_required
-def chat_clear(name):
-    clear_history(current_user.id, name)
-    clear_session_id(current_user.id, name)
-    if request.accept_mimetypes.best == "application/json" or request.is_json:
-        return jsonify({"ok": True})
-    return redirect(url_for("chat_page", name=name))
-
-
 # ---------------------------------------------------------------------------
 # Background task endpoints
 # ---------------------------------------------------------------------------
-
-
-@app.route("/chat/<name>/tasks")
-@login_required
-def bg_tasks_list(name):
-    uid = current_user.id
-    with _bg_tasks_lock:
-        tasks = [
-            {k: v for k, v in t.items() if k not in ("uid",)}
-            for key, t in _bg_tasks.items()
-            if key[0] == uid and key[1] == name
-        ]
-    return jsonify({"tasks": tasks})
-
-
-@app.route("/chat/<name>/tasks/<task_id>/poll")
-@login_required
-def bg_task_poll(name, task_id):
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-
-    key = (uid, name, task_id)
-    with _bg_tasks_lock:
-        task = _bg_tasks.get(key)
-    if not task:
-        return jsonify({"error": "Task not found"}), 404
-
-    # If already finished, return cached status
-    if task["status"] != "running":
-        return jsonify(
-            {
-                "task_id": task_id,
-                "pid": task["pid"],
-                "status": task["status"],
-                "exit_code": task["exit_code"],
-                "output": "",
-                "label": task["label"],
-                "elapsed": round(_time.time() - task["started_at"]),
-            }
-        )
-
-    try:
-        client = _get_stats_conn(uid, server)
-        cmd = (
-            f"echo '===PID===' && "
-            f"(kill -0 {task['pid']} 2>/dev/null && echo 'RUNNING' || echo 'DONE') && "
-            f"echo '===EXIT===' && "
-            f"(cat {task['exit_file']} 2>/dev/null || echo '-') && "
-            f"echo '===LOG===' && "
-            f"tail -80 {task['log_file']} 2>/dev/null"
-        )
-        _, stdout, _ = client.exec_command(cmd, timeout=10)
-        out = stdout.read().decode(errors="replace")
-
-        # Parse sections
-        sections = {}
-        current = None
-        for line in out.split("\n"):
-            stripped = line.strip()
-            if stripped == "===PID===":
-                current = "pid"
-                sections[current] = []
-                continue
-            elif stripped == "===EXIT===":
-                current = "exit"
-                sections[current] = []
-                continue
-            elif stripped == "===LOG===":
-                current = "log"
-                sections[current] = []
-                continue
-            if current is not None:
-                sections.setdefault(current, []).append(line)
-
-        is_running = "RUNNING" in "\n".join(sections.get("pid", []))
-        exit_str = "\n".join(sections.get("exit", [])).strip().rstrip("-").strip()
-        exit_code = int(exit_str) if exit_str.isdigit() else None
-        log_output = "\n".join(sections.get("log", []))
-
-        status = (
-            "running" if is_running else ("finished" if exit_code == 0 else "failed")
-        )
-
-        with _bg_tasks_lock:
-            if key in _bg_tasks:
-                _bg_tasks[key]["status"] = status
-                if exit_code is not None:
-                    _bg_tasks[key]["exit_code"] = exit_code
-
-        return jsonify(
-            {
-                "task_id": task_id,
-                "pid": task["pid"],
-                "status": status,
-                "exit_code": exit_code,
-                "output": log_output,
-                "label": task["label"],
-                "elapsed": round(_time.time() - task["started_at"]),
-            }
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/chat/<name>/tasks/<task_id>/complete")
-@login_required
-def bg_task_complete(name, task_id):
-    """Get final output for AI continuation."""
-    uid = current_user.id
-    server = get_server(uid, name)
-    if not server:
-        return jsonify({"error": "Server not found"}), 404
-
-    key = (uid, name, task_id)
-    with _bg_tasks_lock:
-        task = _bg_tasks.get(key)
-    if not task:
-        return jsonify({"error": "Task not found"}), 404
-
-    try:
-        client = _get_stats_conn(uid, server)
-        cmd = (
-            f"echo '===EXIT===' && (cat {task['exit_file']} 2>/dev/null || echo '-') && "
-            f"echo '===LOG===' && tail -30 {task['log_file']} 2>/dev/null"
-        )
-        _, stdout, _ = client.exec_command(cmd, timeout=10)
-        out = stdout.read().decode(errors="replace")
-
-        exit_str = (
-            out.split("===LOG===")[0]
-            .replace("===EXIT===", "")
-            .strip()
-            .rstrip("-")
-            .strip()
-        )
-        exit_code = int(exit_str) if exit_str.isdigit() else -1
-        log_output = out.split("===LOG===")[-1].strip() if "===LOG===" in out else ""
-
-        return jsonify(
-            {
-                "task_id": task_id,
-                "exit_code": exit_code,
-                "output": log_output,
-                "label": task["label"],
-            }
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/chat/<name>/tasks/<task_id>/dismiss", methods=["POST"])
-@login_required
-def bg_task_dismiss(name, task_id):
-    uid = current_user.id
-    key = (uid, name, task_id)
-    with _bg_tasks_lock:
-        _bg_tasks.pop(key, None)
-    # Clean up remote files
-    server = get_server(uid, name)
-    if server:
-        try:
-            client = _get_stats_conn(uid, server)
-            client.exec_command(
-                f"rm -f /tmp/aissh_bg_{task_id}.log /tmp/aissh_bg_{task_id}.exit",
-                timeout=5,
-            )
-        except Exception:
-            pass
-    return jsonify({"ok": True})
-
-
-@app.route("/chat/<name>/memory", methods=["GET"])
-@login_required
-def chat_memory_get(name):
-    return jsonify({"content": load_memory(current_user.id, name)})
-
-
-@app.route("/chat/<name>/memory", methods=["POST"])
-@login_required
-def chat_memory_set(name):
-    data = request.get_json() or {}
-    save_memory(current_user.id, name, data.get("content", ""))
-    return jsonify({"ok": True})
-
-
-@app.route("/settings/provider", methods=["POST"])
-@login_required
-def set_provider():
-    data = request.get_json() or {}
-    p = data.get("provider", "claude")
-    if p in ("claude", "deepseek"):
-        save_provider(current_user.id, p)
-    return jsonify({"provider": get_provider(current_user.id)})
 
 
 @app.route("/settings/model", methods=["POST"])
@@ -2974,15 +2470,6 @@ def set_model():
         save_model(current_user.id, model_id)
     cur_model = get_model(current_user.id) or DEFAULT_MODEL
     return jsonify({"model": cur_model})
-
-
-@app.route("/settings/thinking", methods=["POST"])
-@login_required
-def set_thinking():
-    data = request.get_json() or {}
-    enabled = bool(data.get("enabled", False))
-    save_thinking(current_user.id, enabled)
-    return jsonify({"thinking": get_thinking(current_user.id)})
 
 
 # ---------------------------------------------------------------------------
