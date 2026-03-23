@@ -20,8 +20,10 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-# ── Stop old service if running ──
+# ── Stop anything using port 5002 ──
 systemctl stop aissh 2>/dev/null || true
+lsof -ti:5002 2>/dev/null | xargs kill -9 2>/dev/null || true
+sleep 1
 
 # ── Detect package manager ──
 if command -v apt-get >/dev/null 2>&1; then
