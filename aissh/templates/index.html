@@ -2,76 +2,163 @@
 {% block title %}Servers -- AI SSH Helper{% endblock %}
 {% block head %}
 <style>
+  /* ── Page Header ── */
   .page-hdr {
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 1.5rem; gap: .5rem;
+    margin-bottom: 1.75rem; gap: .75rem;
   }
-  .page-hdr h2 { margin: 0; font-size: 1.1rem; font-weight: 700; }
+  .page-hdr h2 { margin: 0; font-size: 1.2rem; font-weight: 700; letter-spacing: -.01em; }
   .page-hdr .cnt {
-    font-size: 11px; color: var(--muted); font-weight: 500;
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 10px; padding: 1px 8px; margin-left: 6px;
+    font-size: 10.5px; color: var(--muted); font-weight: 600;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 2px 9px; margin-left: 8px;
+    vertical-align: middle;
   }
+  .hdr-actions { display: flex; gap: 8px; align-items: center; }
 
+  /* ── Server Grid ── */
   .srv-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 14px;
   }
 
+  /* ── Server Card ── */
   .srv-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 18px 20px 14px;
-    display: flex; flex-direction: column; gap: 12px;
-    transition: all .2s ease;
-    position: relative;
-    border-top: 2px solid transparent;
+    border-radius: 14px;
+    padding: 0;
+    display: flex; flex-direction: column;
+    transition: border-color .2s, box-shadow .2s;
+    overflow: hidden;
   }
   .srv-card:hover {
     border-color: var(--border2);
-    border-top-color: var(--accent-btn);
-    box-shadow: 0 8px 24px rgba(0,0,0,.2);
-    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,0,0,.25);
   }
 
-  .card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-  .card-info { min-width: 0; }
+  /* Card header strip */
+  .card-header {
+    padding: 16px 18px 14px;
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: default;
+  }
+  .card-info { min-width: 0; flex: 1; }
   .card-name {
-    font-weight: 600; font-size: 13.5px; color: var(--text);
+    font-weight: 700; font-size: 14px; color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    margin-bottom: 2px;
+    margin-bottom: 4px; letter-spacing: -.01em;
   }
   .card-addr {
     font-size: 11.5px; color: var(--muted);
     font-family: 'JetBrains Mono','Fira Code',monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+
+  /* Badges */
+  .card-badges { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
   .badge {
-    display: inline-flex; align-items: center; flex-shrink: 0;
-    padding: 2px 7px; border-radius: 4px;
-    font-size: 10px; font-weight: 600; letter-spacing: .03em;
+    display: inline-flex; align-items: center;
+    padding: 3px 8px; border-radius: 5px;
+    font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
+    text-transform: uppercase;
   }
-  .badge-pem { background: rgba(34,197,94,.08); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
-  .badge-pw  { background: rgba(59,130,246,.06); color: var(--accent); border: 1px solid rgba(59,130,246,.15); }
+  .badge-pem { background: rgba(34,197,94,.1); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
+  .badge-pw  { background: rgba(139,92,246,.08); color: var(--purple); border: 1px solid rgba(139,92,246,.2); }
 
-  .card-actions {
-    display: flex; gap: 6px; align-items: center;
-    margin-top: auto;
-  }
-  .card-actions > a.ctl,
-  .card-actions > .qa-wrap,
-  .card-actions > form { flex: 1; min-width: 0; }
-  .card-actions > a.ctl:first-child { flex: 2; }
-  .card-actions > form { display: flex; margin: 0; }
-  .card-actions > form > .ctl { flex: 1; }
-  .card-actions .ctl {
-    font-size: 11.5px; width: 100%; height: 32px;
-    box-sizing: border-box;
+  /* Card body - action buttons */
+  .card-body {
+    padding: 12px 18px 14px;
+    display: flex; gap: 8px; align-items: center;
   }
 
-  .empty-state { text-align: center; padding: 4rem 1rem; }
-  .empty-state p { font-size: 14px; color: var(--muted); margin: 0 0 1.25rem; }
+  /* Primary connect button */
+  .btn-connect {
+    flex: 1;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 34px; padding: 0 14px;
+    font-size: 12.5px; font-weight: 600; font-family: inherit;
+    border-radius: 8px; border: none;
+    background: var(--accent-btn); color: #fff;
+    cursor: pointer; white-space: nowrap;
+    transition: background .15s, box-shadow .15s;
+    text-decoration: none;
+  }
+  .btn-connect:hover {
+    background: var(--accent-hover);
+    box-shadow: 0 4px 14px rgba(37,99,235,.3);
+  }
+  .btn-connect svg { width: 14px; height: 14px; }
+
+  /* Icon buttons for Edit, Actions, Delete */
+  .btn-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; flex-shrink: 0;
+    border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--muted);
+    cursor: pointer; transition: all .15s;
+    padding: 0;
+  }
+  .btn-icon:hover { background: var(--surface3); border-color: var(--border2); color: var(--text); }
+  .btn-icon svg { width: 15px; height: 15px; }
+  .btn-icon.danger:hover { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.4); color: var(--red); }
+
+  /* ── Dropdown Menu ── */
+  .qa-menu {
+    position: fixed; z-index: 9999;
+    background: var(--surface); border: 1px solid var(--border2);
+    border-radius: 10px; padding: 5px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.03);
+    min-width: 170px; width: max-content;
+    display: none;
+  }
+  .qa-menu.show { display: block; }
+  .qa-menu button {
+    display: flex; width: 100%; align-items: center; gap: 8px; text-align: left;
+    padding: 7px 11px; font-size: 12px; color: var(--text2);
+    border-radius: 6px; cursor: pointer; transition: background .1s, color .1s;
+    background: none; border: none; font-family: inherit;
+  }
+  .qa-menu button:hover { background: var(--surface2); color: var(--text); }
+  .qa-menu button svg { width: 14px; height: 14px; opacity: .5; flex-shrink: 0; }
+  .qa-menu button:hover svg { opacity: .8; }
+  .qa-menu .menu-sep {
+    height: 1px; background: var(--border); margin: 4px 6px;
+  }
+  .qa-menu button.menu-warn { color: var(--yellow); }
+  .qa-menu button.menu-warn:hover { background: rgba(234,179,8,.06); }
+  .qa-menu button.menu-danger { color: var(--red); }
+  .qa-menu button.menu-danger:hover { background: rgba(239,68,68,.06); }
+
+  /* ── Empty State ── */
+  .empty-state {
+    text-align: center; padding: 5rem 1.5rem;
+  }
+  .empty-icon {
+    width: 56px; height: 56px; margin: 0 auto 1.25rem;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .empty-icon svg { width: 24px; height: 24px; color: var(--muted); }
+  .empty-state h3 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+  .empty-state p { font-size: 13px; color: var(--muted); margin: 0 0 1.5rem; }
+
+  /* ── Tooltip ── */
+  [data-tip] { position: relative; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute; bottom: calc(100% + 6px); left: 50%;
+    transform: translateX(-50%); white-space: nowrap;
+    font-size: 10.5px; font-weight: 500; color: #fff;
+    background: var(--surface3); border: 1px solid var(--border2);
+    border-radius: 5px; padding: 3px 8px;
+    pointer-events: none; opacity: 0; transition: opacity .15s;
+    z-index: 10;
+  }
+  [data-tip]:hover::after { opacity: 1; }
 
   /* ── Modal shared ── */
   dialog article {
@@ -149,42 +236,16 @@
   .seg-btn.on { background: var(--accent-btn); color: #fff; }
   .seg-btn:not(.on):hover { background: var(--surface3); color: var(--text); }
 
-  /* ── Quick Actions ── */
-  .qa-wrap { position: relative; display: flex; flex: 1; }
-  .qa-wrap > .qa-toggle { flex: 1; }
-  .srv-card.qa-open { z-index: 100; }
-  .qa-menu {
-    position: fixed; z-index: 9999;
-    background: var(--surface); border: 1px solid var(--border2);
-    border-radius: 8px; padding: 4px;
-    box-shadow: 0 12px 32px rgba(0,0,0,.6);
-    min-width: 160px; width: max-content;
-    display: none;
-  }
-  .qa-menu.show { display: block; }
-  .qa-menu button {
-    display: block; width: 100%; text-align: left;
-    padding: 6px 10px; font-size: 11.5px; color: var(--text2);
-    border-radius: 4px; cursor: pointer; transition: background .1s;
-    background: none; border: none; font-family: inherit;
-  }
-  .qa-menu button:hover { background: var(--surface2); color: var(--text); }
-  .qa-menu hr { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
-
-  /* Quick action result modal */
+  /* ── Quick action result modal ── */
   #qa-modal { max-width: min(680px, 95vw); }
-  #qa-output {
-    max-height: 450px; overflow: auto;
-  }
+  #qa-output { max-height: 450px; overflow: auto; }
   #qa-output pre {
     background: var(--bg); color: var(--text2); border: 1px solid var(--border);
     border-radius: 6px; font-family: 'JetBrains Mono','Fira Code',monospace;
     font-size: 11px; line-height: 1.5; padding: 10px; margin: 0;
     white-space: pre-wrap; word-break: break-all;
   }
-  #qa-output table {
-    width: 100%; border-collapse: collapse; font-size: 12px;
-  }
+  #qa-output table { width: 100%; border-collapse: collapse; font-size: 12px; }
   #qa-output th {
     text-align: left; padding: 6px 10px; font-size: 10px; font-weight: 700;
     color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
@@ -199,23 +260,77 @@
   #qa-output tr:hover td { background: var(--surface2); }
   #qa-output td:first-child { color: var(--accent); font-weight: 600; }
 
+  /* ── Mobile ── */
   @media (max-width: 520px) {
     .page-hdr { flex-wrap: wrap; }
+    .hdr-actions { flex-wrap: wrap; width: 100%; }
+    .hdr-actions .ctl { flex: 1; }
+    .srv-grid { grid-template-columns: 1fr; }
     .form-grid { grid-template-columns: 1fr !important; }
     .src-dst-grid { grid-template-columns: 1fr !important; }
+    .card-body { gap: 6px; }
+    .btn-connect { font-size: 12px; }
   }
 </style>
 {% endblock %}
 {% block content %}
 
+<!-- SVG icon defs (hidden) -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="ico-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+  </symbol>
+  <symbol id="ico-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+  </symbol>
+  <symbol id="ico-more" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>
+  </symbol>
+  <symbol id="ico-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+  </symbol>
+  <symbol id="ico-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+  </symbol>
+  <symbol id="ico-hdd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/>
+  </symbol>
+  <symbol id="ico-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>
+  </symbol>
+  <symbol id="ico-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+  </symbol>
+  <symbol id="ico-network" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+  </symbol>
+  <symbol id="ico-radio" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/>
+  </symbol>
+  <symbol id="ico-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+  </symbol>
+  <symbol id="ico-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+  </symbol>
+  <symbol id="ico-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+  </symbol>
+  <symbol id="ico-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+  </symbol>
+</svg>
+
 <div class="page-hdr">
   <h2>Servers {% if servers %}<span class="cnt">{{ servers | length }}</span>{% endif %}</h2>
-  <div style="display:flex;gap:6px;">
+  <div class="hdr-actions">
     {% if servers | length >= 2 %}
     <a href="{{ url_for('multi_terminal') }}" class="ctl">Multi Terminal</a>
     <button class="ctl" onclick="openMigrateModal()">Migrate</button>
     {% endif %}
-    <button class="ctl active" onclick="document.getElementById('add-modal').showModal()">+ Add Server</button>
+    <button class="ctl active" onclick="document.getElementById('add-modal').showModal()">
+      <svg style="width:13px;height:13px;margin-right:4px"><use href="#ico-plus"/></svg> Add Server
+    </button>
   </div>
 </div>
 
@@ -223,38 +338,35 @@
 <div class="srv-grid">
   {% for s in servers %}
   <div class="srv-card">
-    <div class="card-top">
+    <div class="card-header">
       <div class="card-info">
         <div class="card-name">{{ s.name }}</div>
         <div class="card-addr">{{ s.user }}@{{ s.host }}{% if s.port != 22 %}:{{ s.port }}{% endif %}</div>
       </div>
-      {% if s.get('pem_key') %}
-      <span class="badge badge-pem">PEM</span>
-      {% else %}
-      <span class="badge badge-pw">PWD</span>
-      {% endif %}
-    </div>
-    <div class="card-actions">
-      <a href="{{ url_for('chat_page', name=s.name) }}" class="ctl active">Terminal</a>
-      <a href="{{ url_for('servers_edit', name=s.name) }}" class="ctl">Edit</a>
-      <div class="qa-wrap">
-        <button type="button" class="ctl qa-toggle">Actions &#9662;</button>
-        <div class="qa-menu">
-          <button data-srv="{{ s.name }}" data-act="uptime">System Info</button>
-          <button data-srv="{{ s.name }}" data-act="disk">Disk Usage</button>
-          <button data-srv="{{ s.name }}" data-act="memory">Memory</button>
-          <button data-srv="{{ s.name }}" data-act="processes">Processes</button>
-          <button data-srv="{{ s.name }}" data-act="connections">Connections</button>
-          <button data-srv="{{ s.name }}" data-act="ports">Ports</button>
-          <hr>
-          <button data-srv="{{ s.name }}" data-act="update" style="color:var(--yellow);">Update Pkgs</button>
-          <button data-srv="{{ s.name }}" data-act="reboot" style="color:var(--red);">Reboot</button>
-        </div>
+      <div class="card-badges">
+        {% if s.get('pem_key') %}
+        <span class="badge badge-pem">PEM</span>
+        {% else %}
+        <span class="badge badge-pw">KEY</span>
+        {% endif %}
       </div>
+    </div>
+    <div class="card-body">
+      <a href="{{ url_for('chat_page', name=s.name) }}" class="btn-connect">
+        <svg><use href="#ico-terminal"/></svg> Connect
+      </a>
+      <a href="{{ url_for('servers_edit', name=s.name) }}" class="btn-icon" data-tip="Edit">
+        <svg><use href="#ico-edit"/></svg>
+      </a>
+      <button type="button" class="btn-icon qa-toggle" data-tip="Actions" data-server="{{ s.name }}">
+        <svg><use href="#ico-more"/></svg>
+      </button>
       <form method="post" action="{{ url_for('servers_delete', name=s.name) }}"
-            onsubmit="return confirm('Delete ' + {{ s.name | tojson }} + '?');" style="margin:0;">
-        <button type="button" class="ctl danger"
-                onclick="this.closest('form').requestSubmit()">Del</button>
+            onsubmit="return confirm('Delete ' + {{ s.name | tojson }} + '?');" style="margin:0;display:flex;">
+        <button type="button" class="btn-icon danger" data-tip="Delete"
+                onclick="this.closest('form').requestSubmit()">
+          <svg><use href="#ico-trash"/></svg>
+        </button>
       </form>
     </div>
   </div>
@@ -262,10 +374,27 @@
 </div>
 {% else %}
 <div class="empty-state">
-  <p>No servers yet. Add one to get started.</p>
-  <button class="ctl active" onclick="document.getElementById('add-modal').showModal()">+ Add Server</button>
+  <div class="empty-icon"><svg><use href="#ico-server"/></svg></div>
+  <h3>No servers yet</h3>
+  <p>Add your first server to start managing it remotely.</p>
+  <button class="ctl active" onclick="document.getElementById('add-modal').showModal()">
+    <svg style="width:13px;height:13px;margin-right:4px"><use href="#ico-plus"/></svg> Add Server
+  </button>
 </div>
 {% endif %}
+
+<!-- Shared dropdown menu (moved to body by JS) -->
+<div class="qa-menu" id="qa-dropdown">
+  <button data-act="uptime"><svg><use href="#ico-info"/></svg> System Info</button>
+  <button data-act="disk"><svg><use href="#ico-hdd"/></svg> Disk Usage</button>
+  <button data-act="memory"><svg><use href="#ico-cpu"/></svg> Memory</button>
+  <button data-act="processes"><svg><use href="#ico-activity"/></svg> Processes</button>
+  <button data-act="connections"><svg><use href="#ico-network"/></svg> Connections</button>
+  <button data-act="ports"><svg><use href="#ico-radio"/></svg> Ports</button>
+  <div class="menu-sep"></div>
+  <button data-act="update" class="menu-warn"><svg><use href="#ico-download"/></svg> Update Packages</button>
+  <button data-act="reboot" class="menu-danger"><svg><use href="#ico-refresh"/></svg> Reboot Server</button>
+</div>
 
 <!-- Add Server Modal -->
 <dialog id="add-modal">
@@ -391,49 +520,54 @@
 </dialog>
 
 <script>
-// ── Quick Actions (event delegation) ──
-function closeAllMenus() {
-  document.querySelectorAll('.qa-menu.show').forEach(function(m){ m.classList.remove('show'); });
-  document.querySelectorAll('.srv-card.qa-open').forEach(function(c){ c.classList.remove('qa-open'); });
+// ── Quick Actions ──
+var _qaMenu = document.getElementById('qa-dropdown');
+var _qaServer = null;
+
+function closeMenu() {
+  _qaMenu.classList.remove('show');
+  _qaServer = null;
 }
 
 document.addEventListener('click', function(e) {
-  // Toggle dropdown
+  // Toggle button
   var toggle = e.target.closest('.qa-toggle');
   if (toggle) {
     e.stopPropagation();
-    var menu = toggle.parentElement.querySelector('.qa-menu');
-    var wasOpen = menu.classList.contains('show');
-    closeAllMenus();
+    var srv = toggle.getAttribute('data-server');
+    var wasOpen = _qaMenu.classList.contains('show') && _qaServer === srv;
+    closeMenu();
     if (!wasOpen) {
       var rect = toggle.getBoundingClientRect();
-      menu.style.top = (rect.bottom + 4) + 'px';
-      menu.style.left = rect.left + 'px';
-      menu.style.minWidth = rect.width + 'px';
-      menu.classList.add('show');
-      toggle.closest('.srv-card').classList.add('qa-open');
+      _qaServer = srv;
+      // Position menu below button, align right edge
+      var menuWidth = 180;
+      var left = rect.right - menuWidth;
+      if (left < 8) left = rect.left;
+      _qaMenu.style.top = (rect.bottom + 6) + 'px';
+      _qaMenu.style.left = left + 'px';
+      _qaMenu.classList.add('show');
     }
     return;
   }
-  // Action button clicked
-  var actBtn = e.target.closest('.qa-menu button[data-act]');
+  // Menu action clicked
+  var actBtn = e.target.closest('#qa-dropdown button[data-act]');
   if (actBtn) {
     e.stopPropagation();
-    var srv = actBtn.getAttribute('data-srv');
     var act = actBtn.getAttribute('data-act');
-    closeAllMenus();
-    runQuickAction(srv, act);
+    var srv = _qaServer;
+    closeMenu();
+    if (srv) runQuickAction(srv, act);
     return;
   }
-  // Click outside - close all
+  // Click outside
   if (!e.target.closest('.qa-menu')) {
-    closeAllMenus();
+    closeMenu();
   }
 });
 
-// Close menu on scroll/resize so it doesn't float away
-window.addEventListener('scroll', closeAllMenus, true);
-window.addEventListener('resize', closeAllMenus);
+window.addEventListener('scroll', closeMenu, true);
+window.addEventListener('resize', closeMenu);
 
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -498,7 +632,7 @@ document.getElementById("mg-packages").addEventListener("change",function(){docu
 function appendLog(l,m){var t=document.getElementById("migrate-log"),p={ok:"+",warn:"!",error:"x",skip:"-",info:"."};t.value+=(p[l]||".")+" "+m+"\n";t.scrollTop=t.scrollHeight;}
 function setBarRunning(r){var b=document.getElementById("migrate-progress-bar");if(r)b.classList.add("running");else b.classList.remove("running");}
 function updateProgress(d){document.getElementById("migrate-file-counter").textContent=d>0?d+" files":"Starting...";}
-async function startMigration(){var s=document.getElementById("mg-src").value,d=document.getElementById("mg-dst").value,pk=document.getElementById("mg-packages").checked,f=_migrateMode==="full";var b={target:d,full_server:f,do_packages:pk};if(!f){var paths=Array.from(document.querySelectorAll('input[name="mg-path"]:checked')).map(c=>c.value);if(!paths.length){alert("Select at least one path.");return;}b.paths=paths;}document.getElementById("migrate-start-btn").style.display="none";document.getElementById("migrate-abort-btn").style.display="";document.getElementById("migrate-cancel-btn").disabled=true;document.getElementById("migrate-close-btn").style.display="none";document.getElementById("mg-progress-section").style.display="";document.getElementById("migrate-log").value="";document.getElementById("migrate-progress-bar").style.width="0%";document.getElementById("migrate-file-counter").textContent="Starting...";setBarRunning(true);appendLog("info","Migrating "+s+" -> "+d+" ("+(f?"full server":b.paths.join(", "))+")");try{var r=await fetch("/servers/"+encodeURIComponent(s)+"/migrate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});if(!r.ok){var e=await r.json().catch(()=>({error:r.statusText}));appendLog("error",e.error||"Failed");_finishMigration();return;}var reader=r.body.getReader(),dec=new TextDecoder(),buf="";while(true){var{value,done}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});var blocks=buf.split("\n\n");buf=blocks.pop();for(var bl of blocks){if(!bl.trim())continue;var ev="message",dl="";for(var ln of bl.split("\n")){if(ln.startsWith("event: "))ev=ln.slice(7).trim();else if(ln.startsWith("data: "))dl=ln.slice(6).trim();}if(!dl)continue;var p;try{p=JSON.parse(dl);}catch{continue;}if(ev==="start")_migrationId=p.migration_id;else if(ev==="progress")updateProgress(p.done);else if(ev==="log")appendLog(p.level,p.msg);else if(ev==="error"){appendLog("error",p.msg);_finishMigration(0);return;}else if(ev==="done"){setBarRunning(false);document.getElementById("migrate-progress-bar").style.width="100%";updateProgress(p.transferred);appendLog(p.aborted?"warn":"ok",(p.aborted?"Aborted":"Done")+" - "+p.transferred+" copied, "+p.skipped+" skipped, "+p.errors+" errors");_finishMigration(p.transferred);return;}}}_finishMigration(0);}catch(e){appendLog("error","Lost connection: "+e.message);_finishMigration(0);}}
+async function startMigration(){var s=document.getElementById("mg-src").value,d=document.getElementById("mg-dst").value,pk=document.getElementById("mg-packages").checked,f=_migrateMode==="full";var b={target:d,full_server:f,do_packages:pk};if(!f){var paths=Array.from(document.querySelectorAll('input[name="mg-path"]:checked')).map(c=>c.value);if(!paths.length){alert("Select at least one path.");return;}b.paths=paths;}document.getElementById("migrate-start-btn").style.display="none";document.getElementById("migrate-abort-btn").style.display="";document.getElementById("migrate-cancel-btn").disabled=true;document.getElementById("migrate-close-btn").style.display="none";document.getElementById("mg-progress-section").style.display="";document.getElementById("migrate-log").value="";document.getElementById("migrate-progress-bar").style.width="0%";document.getElementById("migrate-file-counter").textContent="Starting...";setBarRunning(true);appendLog("info","Migrating "+s+" -> "+d+" ("+(f?"full server":b.paths.join(", "))+")");try{var r=await fetch("/servers/"+encodeURIComponent(s)+"/migrate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});if(!r.ok){var e=await r.json().catch(()=>({error:r.statusText}));appendLog("error",e.error||"Failed");_finishMigration();return;}var reader=r.body.getReader(),dec=new TextDecoder(),buf="";while(true){var{value,done}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});var blocks=buf.split("\n\n");buf=blocks.pop();for(var bl of blocks){if(!bl.trim())continue;var ev="message",dl="";for(var ln of bl.split("\n")){if(ln.startsWith("event: "))ev=ln.slice(7).trim();else if(ln.startsWith("data: "))dl=ln.slice(6).trim();}if(!dl)continue;var p;try{p=JSON.parse(dl);}catch{continue;}if(ev==="start")_migrationId=p.migration_id;else if(ev==="progress")updateProgress(p.done);else if(ev==="log")appendLog(p.level,p.msg);else if(ev==="error"){appendLog("error",p.msg);_finishMigration(0);return;}else if(ev==="done"){appendLog("ok","Migration complete!");document.getElementById("migrate-progress-bar").style.width="100%";_finishMigration(1);return;}}}}catch(err){appendLog("error","Connection error: "+err.message);_finishMigration(0);}}
 function _finishMigration(t){setBarRunning(false);if(!t)document.getElementById("migrate-progress-bar").style.width="0%";document.getElementById("migrate-abort-btn").style.display="none";document.getElementById("migrate-start-btn").style.display="";document.getElementById("migrate-cancel-btn").disabled=false;document.getElementById("migrate-cancel-btn").textContent="Close";document.getElementById("migrate-close-btn").style.display="";}
 async function abortMigration(){if(!_migrationId)return;document.getElementById("migrate-abort-btn").disabled=true;appendLog("warn","Aborting...");try{await fetch("/migrate/"+_migrationId+"/abort",{method:"POST"});}catch(e){appendLog("error","Could not abort: "+e.message);}}
 </script>
