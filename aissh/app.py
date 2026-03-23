@@ -1220,9 +1220,28 @@ def ws_terminal(ws, name):
             pass
 
 
+def _find_ai_cli() -> str | None:
+    """Find opencode or claude CLI binary."""
+    search_paths = [
+        os.path.expanduser("~/.opencode/bin"),
+        os.path.expanduser("~/.local/bin"),
+        "/usr/local/bin",
+        "/usr/bin",
+    ]
+    for cmd in ["opencode", "claude"]:
+        found = shutil.which(cmd)
+        if found:
+            return found
+        for p in search_paths:
+            full = os.path.join(p, cmd)
+            if os.path.isfile(full) and os.access(full, os.X_OK):
+                return full
+    return None
+
+
 @sock.route("/ws/ai-terminal/<name>")
 def ws_ai_terminal(ws, name):
-    """WebSocket terminal that runs opencode locally, connected to the remote server via SSH."""
+    """WebSocket terminal that runs opencode/claude CLI via a local SSH session."""
     if not current_user.is_authenticated:
         ws.close()
         return
@@ -1232,44 +1251,7 @@ def ws_ai_terminal(ws, name):
         ws.send("\r\n\x1b[31mServer not found.\x1b[0m\r\n")
         return
 
-    import pty as _pty
-    import select
-
-    # Build SSH command to connect to the remote server
-    host = server["host"]
-    port = server.get("port", 22)
-    user = server["user"]
-    password = server.get("password", "")
-    pem = server.get("pem_key", "")
-
-    # Build the opencode/claude command that will run locally
-    # It gets an SSH shell into the remote server as its execution environment
-    ssh_target = f"{user}@{host}" + (f" -p {port}" if port != 22 else "")
-
-    # Find which AI CLI is available locally
-    # Check common install paths since systemd PATH is limited
-    search_paths = [
-        os.path.expanduser("~/.opencode/bin"),
-        os.path.expanduser("~/.local/bin"),
-        "/usr/local/bin",
-        "/usr/bin",
-    ]
-    ai_cli = None
-    for cmd in ["opencode", "claude"]:
-        # Check PATH first
-        found = shutil.which(cmd)
-        if found:
-            ai_cli = found
-            break
-        # Then check common locations
-        for p in search_paths:
-            full = os.path.join(p, cmd)
-            if os.path.isfile(full) and os.access(full, os.X_OK):
-                ai_cli = full
-                break
-        if ai_cli:
-            break
-
+    ai_cli = _find_ai_cli()
     if not ai_cli:
         ws.send(
             "\r\n\x1b[31mNo AI CLI found on this server.\x1b[0m\r\n"
@@ -1278,46 +1260,73 @@ def ws_ai_terminal(ws, name):
         )
         return
 
-    # Spawn a local PTY running the AI CLI
-    env = os.environ.copy()
-    # Ensure the AI CLI's own directory is in PATH
-    cli_dir = os.path.dirname(ai_cli)
-    env["PATH"] = cli_dir + ":" + env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
-    env["AISSH_SSH_HOST"] = host
-    env["AISSH_SSH_PORT"] = str(port)
-    env["AISSH_SSH_USER"] = user
-    env["TERM"] = "xterm-256color"
-    env["HOME"] = os.path.expanduser("~")
+    # SSH into localhost and run the AI CLI from there.
+    # This works because paramiko gives us a proper channel that works
+    # with gevent, unlike pty.openpty() + select.select().
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect("127.0.0.1", port=22, username="root", timeout=5)
+    except Exception as e:
+        ws.send(f"\r\n\x1b[31mCannot connect to local SSH: {e}\x1b[0m\r\n")
+        return
 
-    master_fd, slave_fd = _pty.openpty()
-    proc = subprocess.Popen(
-        [ai_cli],
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=slave_fd,
-        env=env,
-        preexec_fn=os.setsid,
-    )
-    os.close(slave_fd)
+    channel = client.invoke_shell(term="xterm-256color", width=120, height=40)
+    channel.setblocking(False)
+
+    # Set up PATH and launch the AI CLI
+    cli_dir = os.path.dirname(ai_cli)
+    _time.sleep(0.3)
+    channel.send(f"export PATH={cli_dir}:$PATH && exec {ai_cli}\r")
 
     stop = threading.Event()
 
-    def _pty_to_ws():
+    def _ssh_to_ws():
         while not stop.is_set():
             try:
-                r, _, _ = select.select([master_fd], [], [], 0.02)
-                if r:
-                    data = os.read(master_fd, 4096)
+                if channel.recv_ready():
+                    data = channel.recv(4096)
                     if not data:
                         break
                     ws.send(data.decode(errors="replace"))
-                if proc.poll() is not None:
+                elif channel.exit_status_ready():
                     break
-            except (OSError, ValueError):
+                else:
+                    _time.sleep(0.01)
+            except Exception:
                 break
         stop.set()
         try:
             ws.close()
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_ssh_to_ws, daemon=True)
+    t.start()
+
+    try:
+        while not stop.is_set():
+            data = ws.receive()
+            if data is None:
+                break
+            if isinstance(data, str) and data.startswith("RESIZE:"):
+                try:
+                    _, cols, rows = data.split(":")
+                    channel.resize_pty(width=int(cols), height=int(rows))
+                except Exception:
+                    pass
+            else:
+                channel.send(data if isinstance(data, bytes) else data.encode())
+    except Exception:
+        pass
+    finally:
+        stop.set()
+        try:
+            channel.close()
+        except Exception:
+            pass
+        try:
+            client.close()
         except Exception:
             pass
 
