@@ -322,9 +322,10 @@ body { overflow: hidden; }
     <h3>AI (OpenCode)</h3>
     <div style="display:flex;gap:4px;align-items:center;">
       <button class="act-btn" onclick="reconnectAI()" title="Reattach to session">Reattach</button>
-      <button class="act-btn" onclick="newAISession()" title="Kill session and start fresh" style="color:var(--yellow);">New</button>
+      <button class="act-btn" onclick="newAISession()" title="Start fresh session" style="color:var(--yellow);">New</button>
       <button class="act-btn" onclick="toggleFullscreen('panel-ai')" title="Toggle fullscreen">&#9634;</button>
-      <button class="sp-close" onclick="closePanel()">&#x2715;</button>
+      <button class="sp-close" onclick="closePanel()" title="Minimize (AI keeps running)">&#8722;</button>
+      <button class="sp-close" onclick="killAI()" title="Close and terminate AI" style="color:var(--red);">&#x2715;</button>
     </div>
   </div>
   <div id="ai-term-container" style="flex:1;min-height:0;overflow:hidden;padding:2px;background:#0a0e14;"></div>
@@ -414,19 +415,21 @@ function openPanel(name){
   return false;
 }
 function closePanel(){
-  // Kill AI session if it was open
-  if (_activePanel === 'ai' && _aiSock) {
-    try { _aiSock.close(); } catch(_){}
-    // Kill the tmux session to free resources
-    fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
-    _aiReady = false;
-    _aiDataBound = false;
-    if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
-  }
+  // Just hide the panel -- AI keeps running in background
   document.querySelectorAll('.side-panel').forEach(function(p){p.classList.remove('open');});
   document.getElementById('sp-overlay').classList.remove('open');
   document.querySelectorAll('.hdr-tabs .tab').forEach(function(t){t.classList.remove('active');});
   _activePanel=null;
+}
+
+function killAI(){
+  // Fully terminate the AI session
+  if (_aiSock) try { _aiSock.close(); } catch(_){}
+  fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
+  _aiReady = false;
+  _aiDataBound = false;
+  if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
+  closePanel();
 }
 
 /* ── Services ── */
