@@ -1341,7 +1341,6 @@ Examples:
     path_env = cli_dir + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
 
     # Create tmux session running opencode in the work directory
-    # No -x/-y -- let the first attach set the size
     subprocess.run(
         [
             "tmux",
@@ -1355,6 +1354,12 @@ Examples:
         ],
         env={**os.environ, "PATH": path_env, "TERM": "xterm-256color"},
         timeout=5,
+    )
+    # Hide tmux status bar -- we don't need it, just the opencode UI
+    subprocess.run(
+        ["tmux", "set-option", "-t", session, "status", "off"],
+        capture_output=True,
+        timeout=2,
     )
     return session
 
