@@ -196,11 +196,35 @@
 </dialog>
 
 <script>
+function showAddServer(id,name,ip){
+  document.getElementById('addServerInfo').textContent=name+' ('+ip+')';
+  document.getElementById('addServerForm').action='/droplets/'+id+'/add-server';
+  document.getElementById('addServerDlg').showModal();
+}
 (function(){
-  var rSel=document.getElementById('regionSelect'),sSel=document.getElementById('sizeSelect'),vSel=document.getElementById('vpcSelect'),vLbl=document.getElementById('vpcLabel');
-  var allS=Array.from(sSel.options).slice(1),allV=vSel?Array.from(vSel.options).slice(1):[];
-  if(rSel)rSel.addEventListener('change',function(){var r=this.value;sSel.innerHTML='<option value="">Select size...</option>';allS.forEach(function(o){var rg=(o.getAttribute('data-regions')||'').split(',');if(!r||rg.indexOf(r)!==-1)sSel.appendChild(o.cloneNode(true));});if(vSel){vSel.innerHTML='<option value="">Default VPC</option>';var has=false;allV.forEach(function(o){if(o.getAttribute('data-region')===r){vSel.appendChild(o.cloneNode(true));has=true;}});vLbl.classList.toggle('show',has);}});
+  var rSel=document.getElementById('regionSelect');
+  var sSel=document.getElementById('sizeSelect');
+  var vSel=document.getElementById('vpcSelect');
+  var vLbl=document.getElementById('vpcLabel');
+  if(!rSel||!sSel)return;
+  var allS=Array.from(sSel.options).slice(1);
+  var allV=vSel?Array.from(vSel.options).slice(1):[];
+  rSel.addEventListener('change',function(){
+    var r=this.value;
+    sSel.innerHTML='<option value="">Select size...</option>';
+    allS.forEach(function(o){
+      var rg=(o.getAttribute('data-regions')||'').split(',');
+      if(!r||rg.indexOf(r)!==-1)sSel.appendChild(o.cloneNode(true));
+    });
+    if(vSel){
+      vSel.innerHTML='<option value="">Default VPC</option>';
+      var has=false;
+      allV.forEach(function(o){
+        if(o.getAttribute('data-region')===r){vSel.appendChild(o.cloneNode(true));has=true;}
+      });
+      if(vLbl)vLbl.classList.toggle('show',has);
+    }
+  });
 })();
-function showAddServer(id,name,ip){document.getElementById('addServerInfo').textContent=name+' ('+ip+')';document.getElementById('addServerForm').action='/droplets/'+id+'/add-server';document.getElementById('addServerDlg').showModal();}
 </script>
 {% endblock %}

@@ -228,7 +228,10 @@ body { overflow: hidden; }
 }
 
 /* ── AI Terminal ── */
-#ai-term-container .xterm { height: 100%; }
+#ai-term-container { display: flex; flex-direction: column; }
+#ai-term-container .xterm { flex: 1; height: 100%; }
+#ai-term-container .xterm-viewport { height: 100% !important; }
+#ai-term-container .xterm-screen { height: 100%; }
 
 /* ── Mobile ── */
 @media (max-width: 600px) {
@@ -334,7 +337,7 @@ body { overflow: hidden; }
       <button class="sp-close" onclick="killAI()" title="Close and terminate AI" style="color:var(--red);">&#x2715;</button>
     </div>
   </div>
-  <div id="ai-term-container" style="flex:1;min-height:0;overflow:hidden;padding:2px;background:#0a0e14;"></div>
+  <div id="ai-term-container" style="flex:1;min-height:0;min-width:0;overflow:hidden;padding:2px;background:#0a0e14;"></div>
 </div>
 
 <script>
