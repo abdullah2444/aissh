@@ -1499,11 +1499,32 @@ def ws_ai_terminal(ws, name):
                     # Resize the PTY
                     winsize = struct.pack("HHHH", r, c, 0, 0)
                     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                    # Also tell tmux to resize its window
+                    # Tell tmux to resize + force full redraw
                     subprocess.run(
                         [
                             "tmux",
                             "resize-window",
+                            "-t",
+                            session,
+                            "-x",
+                            str(c),
+                            "-y",
+                            str(r),
+                        ],
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    # Force the pane to fully clear and redraw
+                    subprocess.run(
+                        ["tmux", "refresh-client", "-S"],
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    # Also resize the pane explicitly
+                    subprocess.run(
+                        [
+                            "tmux",
+                            "resize-pane",
                             "-t",
                             session,
                             "-x",

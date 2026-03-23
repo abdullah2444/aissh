@@ -743,11 +743,21 @@ function startResize(e, panelId) {
 /* ── AI Terminal (OpenCode) ── */
 var _aiTerm = null, _aiFit = null, _aiSock = null;
 
+var _lastAICols = 0, _lastAIRows = 0;
 function fitAI() {
   if (!_aiFit) return;
   _aiFit.fit();
-  if (_aiSock && _aiSock.readyState === WebSocket.OPEN && _aiTerm)
-    _aiSock.send('RESIZE:' + _aiTerm.cols + ':' + _aiTerm.rows);
+  if (!_aiTerm) return;
+  // Only send RESIZE if dimensions actually changed
+  if (_aiTerm.cols !== _lastAICols || _aiTerm.rows !== _lastAIRows) {
+    _lastAICols = _aiTerm.cols;
+    _lastAIRows = _aiTerm.rows;
+    if (_aiSock && _aiSock.readyState === WebSocket.OPEN) {
+      _aiSock.send('RESIZE:' + _aiTerm.cols + ':' + _aiTerm.rows);
+      // Clear stale content after resize
+      _aiTerm.write('\x1b[2J\x1b[H');
+    }
+  }
 }
 
 var _aiReady = false;
