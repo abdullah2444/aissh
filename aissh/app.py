@@ -1264,6 +1264,91 @@ def ws_ai_terminal(ws, name):
     import fcntl
     import termios
     import struct
+    import tempfile
+
+    host = server["host"]
+    port = server.get("port", 22)
+    user = server["user"]
+    password = server.get("password", "")
+    pem = server.get("pem_key", "")
+
+    # Create a temp working directory with a CLAUDE.md that gives context
+    work_dir = tempfile.mkdtemp(prefix=f"aissh_{name.replace(' ', '_')}_")
+
+    # Build SSH command the AI should use
+    ssh_cmd = f"sshpass -p '{password}' ssh -o StrictHostKeyChecking=no"
+    if port != 22:
+        ssh_cmd += f" -p {port}"
+    ssh_cmd += f" {user}@{host}"
+    if pem:
+        # Write temp key file
+        key_path = os.path.join(work_dir, ".ssh_key")
+        with open(key_path, "w") as f:
+            f.write(pem)
+        os.chmod(key_path, 0o600)
+        ssh_cmd = f"ssh -o StrictHostKeyChecking=no -i {key_path}"
+        if port != 22:
+            ssh_cmd += f" -p {port}"
+        ssh_cmd += f" {user}@{host}"
+
+    scp_cmd = f"sshpass -p '{password}' scp -o StrictHostKeyChecking=no"
+    if port != 22:
+        scp_cmd += f" -P {port}"
+    if pem:
+        scp_cmd = f"scp -o StrictHostKeyChecking=no -i {key_path}"
+        if port != 22:
+            scp_cmd += f" -P {port}"
+
+    claude_md = f"""# Server: {name}
+# Connection: {user}@{host}:{port}
+
+You are an AI assistant managing a REMOTE Linux server called "{name}".
+You are NOT running on the target server. You are running on the AISSH host machine.
+
+## How to run commands on the server
+
+Every command you want to run on the server MUST be wrapped with SSH:
+
+```bash
+{ssh_cmd} "COMMAND_HERE"
+```
+
+Examples:
+```bash
+# Check disk space
+{ssh_cmd} "df -h"
+
+# View a file
+{ssh_cmd} "cat /etc/nginx/nginx.conf"
+
+# Restart a service
+{ssh_cmd} "systemctl restart nginx"
+
+# Install a package
+{ssh_cmd} "apt-get install -y htop"
+
+# Check running processes
+{ssh_cmd} "ps aux | head -20"
+```
+
+## How to copy files to/from the server
+
+```bash
+# Upload file to server
+{scp_cmd} localfile {user}@{host}:/remote/path
+
+# Download file from server
+{scp_cmd} {user}@{host}:/remote/path localfile
+```
+
+## Important
+- ALWAYS prefix commands with the SSH wrapper above
+- Do NOT run commands directly (they would run on the AISSH host, not the target server)
+- The server is: {user}@{host} on port {port}
+- Server name in AISSH: {name}
+"""
+    with open(os.path.join(work_dir, "CLAUDE.md"), "w") as f:
+        f.write(claude_md)
 
     # Build env
     env = os.environ.copy()
@@ -1271,11 +1356,8 @@ def ws_ai_terminal(ws, name):
     env["PATH"] = cli_dir + ":" + env.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     env["TERM"] = "xterm-256color"
     env["HOME"] = os.path.expanduser("~")
-    env["AISSH_SSH_HOST"] = server["host"]
-    env["AISSH_SSH_PORT"] = str(server.get("port", 22))
-    env["AISSH_SSH_USER"] = server["user"]
 
-    # Spawn PTY
+    # Spawn PTY in the temp working directory
     master_fd, slave_fd = _pty.openpty()
     proc = subprocess.Popen(
         [ai_cli],
@@ -1283,6 +1365,7 @@ def ws_ai_terminal(ws, name):
         stdout=slave_fd,
         stderr=slave_fd,
         env=env,
+        cwd=work_dir,
         preexec_fn=os.setsid,
     )
     os.close(slave_fd)
@@ -1374,6 +1457,11 @@ def ws_ai_terminal(ws, name):
                 proc.kill()
             except Exception:
                 pass
+        # Clean up temp working directory
+        try:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
