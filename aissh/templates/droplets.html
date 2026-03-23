@@ -160,13 +160,13 @@
       <td>
         <div class="d-actions">
           {% if ns.ip %}
-          <button type="button" class="btn-sm{% if ns.ip not in existing_servers %} accent{% endif %}" onclick="showAddServer({{ d.id }}, {{ d.name | tojson }}, '{{ ns.ip }}')">{% if ns.ip in existing_servers %}Update{% else %}Add to Servers{% endif %}</button>
+          <button type="button" class="btn-sm{% if ns.ip not in existing_servers %} accent{% endif %}" data-add-id="{{ d.id }}" data-add-name="{{ d.name }}" data-add-ip="{{ ns.ip }}">{% if ns.ip in existing_servers %}Update{% else %}Add to Servers{% endif %}</button>
           {% endif %}
           <form method="post" action="{{ url_for('droplets_reboot', droplet_id=d.id) }}">
-            <button type="submit" class="btn-sm" onclick="return confirm('Reboot ' + {{ d.name | tojson }} + '?')">Reboot</button>
+            <button type="submit" class="btn-sm" data-confirm-reboot="{{ d.name }}">Reboot</button>
           </form>
           <form method="post" action="{{ url_for('droplets_delete', droplet_id=d.id) }}">
-            <button type="submit" class="btn-sm danger" onclick="return confirm('DESTROY ' + {{ d.name | tojson }} + '? This cannot be undone!')">Destroy</button>
+            <button type="submit" class="btn-sm danger" data-confirm-destroy="{{ d.name }}">Destroy</button>
           </form>
         </div>
       </td>
@@ -201,6 +201,14 @@ function showAddServer(id,name,ip){
   document.getElementById('addServerForm').action='/droplets/'+id+'/add-server';
   document.getElementById('addServerDlg').showModal();
 }
+document.addEventListener('click',function(e){
+  var btn=e.target.closest('[data-add-id]');
+  if(btn){ showAddServer(btn.dataset.addId, btn.dataset.addName, btn.dataset.addIp); return; }
+  var reboot=e.target.closest('[data-confirm-reboot]');
+  if(reboot && !confirm('Reboot '+reboot.dataset.confirmReboot+'?')){ e.preventDefault(); return; }
+  var destroy=e.target.closest('[data-confirm-destroy]');
+  if(destroy && !confirm('DESTROY '+destroy.dataset.confirmDestroy+'? This cannot be undone!')){ e.preventDefault(); return; }
+});
 (function(){
   var rSel=document.getElementById('regionSelect');
   var sSel=document.getElementById('sizeSelect');
