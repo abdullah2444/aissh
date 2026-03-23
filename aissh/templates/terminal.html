@@ -706,8 +706,7 @@ async function pkgRemove(name){
 function toggleFullscreen(panelId) {
   var panel = document.getElementById(panelId);
   panel.classList.toggle('fullscreen');
-  // Refit AI terminal if it's the AI panel
-  if (panelId === 'panel-ai' && _aiFit) setTimeout(function(){ _aiFit.fit(); }, 50);
+  if (panelId === 'panel-ai') setTimeout(fitAI, 50);
 }
 
 var _resizing = null;
@@ -725,8 +724,7 @@ function startResize(e, panelId) {
     var delta = _resizing.startX - e.clientX;
     var newW = Math.max(300, Math.min(window.innerWidth - 50, _resizing.startW + delta));
     _resizing.panel.style.width = newW + 'px';
-    // Refit AI terminal live during drag
-    if (panelId === 'panel-ai' && _aiFit) _aiFit.fit();
+    if (panelId === 'panel-ai') fitAI();
   }
   function onUp() {
     if (!_resizing) return;
@@ -735,7 +733,7 @@ function startResize(e, panelId) {
     _resizing = null;
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
-    if (panelId === 'panel-ai' && _aiFit) _aiFit.fit();
+    if (panelId === 'panel-ai') fitAI();
   }
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
@@ -744,8 +742,19 @@ function startResize(e, panelId) {
 /* ── AI Terminal (OpenCode) ── */
 var _aiTerm = null, _aiFit = null, _aiSock = null;
 
+function fitAI() {
+  if (!_aiFit) return;
+  _aiFit.fit();
+  if (_aiSock && _aiSock.readyState === WebSocket.OPEN && _aiTerm)
+    _aiSock.send('RESIZE:' + _aiTerm.cols + ':' + _aiTerm.rows);
+}
+
 function initAITerminal() {
-  if (_aiTerm) { _aiFit.fit(); return; }  // already initialized
+  if (_aiTerm) {
+    // Already initialized - just refit after panel opens
+    setTimeout(fitAI, 250);
+    return;
+  }
   _aiTerm = new Terminal({
     cursorBlink: true, cursorStyle: 'bar', fontSize: 13,
     fontFamily: '"JetBrains Mono","Fira Code","SF Mono","Consolas",monospace',
@@ -762,14 +771,12 @@ function initAITerminal() {
   _aiFit = new FitAddon.FitAddon();
   _aiTerm.loadAddon(_aiFit);
   _aiTerm.open(document.getElementById('ai-term-container'));
-  setTimeout(function(){ _aiFit.fit(); }, 50);
+  // Wait for slide-in transition to finish before first fit
+  setTimeout(fitAI, 300);
   connectAI();
 
-  new ResizeObserver(function(){
-    if(_aiFit) _aiFit.fit();
-    if(_aiSock && _aiSock.readyState === WebSocket.OPEN && _aiTerm)
-      _aiSock.send('RESIZE:'+_aiTerm.cols+':'+_aiTerm.rows);
-  }).observe(document.getElementById('ai-term-container'));
+  // Watch the panel element itself for size changes (not just the container)
+  new ResizeObserver(fitAI).observe(document.getElementById('panel-ai'));
 }
 
 function connectAI() {
