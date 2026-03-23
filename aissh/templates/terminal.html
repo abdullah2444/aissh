@@ -809,17 +809,15 @@ function initAITerminal() {
   }, 400);
 }
 
+var _aiDataBound = false;
 function connectAI() {
   if (_aiSock) try { _aiSock.close(); } catch(_){}
   var proto = location.protocol==='https:'?'wss':'ws';
   _aiSock = new WebSocket(proto+'://'+location.host+'/ws/ai-terminal/'+encodeURIComponent(SRV));
   _aiSock.binaryType = 'arraybuffer';
   _aiSock.onopen = function(){
-    // Send size immediately - backend waits for this before spawning opencode
-    var container = document.getElementById('ai-term-container');
-    // Estimate cols/rows from container pixel size if terminal not yet fitted
-    var cols = _aiTerm ? _aiTerm.cols : Math.floor(container.clientWidth / 8);
-    var rows = _aiTerm ? _aiTerm.rows : Math.floor(container.clientHeight / 16);
+    var cols = _aiTerm ? _aiTerm.cols : 80;
+    var rows = _aiTerm ? _aiTerm.rows : 24;
     _aiSock.send('RESIZE:'+Math.max(cols,40)+':'+Math.max(rows,10));
   };
   _aiSock.onmessage = function(e){
@@ -828,7 +826,11 @@ function connectAI() {
   _aiSock.onclose = function(){
     _aiTerm.write('\r\n\x1b[2m--- AI session ended ---\x1b[0m\r\n');
   };
-  _aiTerm.onData(function(d){ try{_aiSock.send(d);}catch(_){} });
+  // Only bind onData once
+  if (!_aiDataBound) {
+    _aiTerm.onData(function(d){ try{_aiSock.send(d);}catch(_){} });
+    _aiDataBound = true;
+  }
 }
 
 function reconnectAI() {
