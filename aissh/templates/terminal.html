@@ -743,20 +743,19 @@ function startResize(e, panelId) {
 /* ── AI Terminal (OpenCode) ── */
 var _aiTerm = null, _aiFit = null, _aiSock = null;
 
-var _lastAICols = 0, _lastAIRows = 0;
+var _lastAICols = 0, _lastAIRows = 0, _aiResizeTimer = null;
 function fitAI() {
-  if (!_aiFit) return;
+  if (!_aiFit || !_aiTerm) return;
   _aiFit.fit();
-  if (!_aiTerm) return;
-  // Only send RESIZE if dimensions actually changed
   if (_aiTerm.cols !== _lastAICols || _aiTerm.rows !== _lastAIRows) {
     _lastAICols = _aiTerm.cols;
     _lastAIRows = _aiTerm.rows;
-    if (_aiSock && _aiSock.readyState === WebSocket.OPEN) {
-      _aiSock.send('RESIZE:' + _aiTerm.cols + ':' + _aiTerm.rows);
-      // Clear stale content after resize
-      _aiTerm.write('\x1b[2J\x1b[H');
-    }
+    // Debounce: reconnect after user stops resizing for 300ms
+    if (_aiResizeTimer) clearTimeout(_aiResizeTimer);
+    _aiResizeTimer = setTimeout(function() {
+      _aiTerm.clear();
+      connectAI();
+    }, 300);
   }
 }
 

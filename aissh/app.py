@@ -1501,73 +1501,8 @@ def ws_ai_terminal(ws, name):
             if isinstance(data, str) and data.startswith("RESIZE:"):
                 try:
                     _, cols, rows = data.split(":")
-                    c, r = int(cols), int(rows)
-                    # Resize the PTY
-                    winsize = struct.pack("HHHH", r, c, 0, 0)
+                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
                     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                    # Resize tmux window + pane + force redraw
-                    subprocess.run(
-                        [
-                            "tmux",
-                            "resize-window",
-                            "-t",
-                            session,
-                            "-x",
-                            str(c),
-                            "-y",
-                            str(r),
-                        ],
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    subprocess.run(
-                        [
-                            "tmux",
-                            "resize-pane",
-                            "-t",
-                            session,
-                            "-x",
-                            str(c),
-                            "-y",
-                            str(r),
-                        ],
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    _time.sleep(0.05)
-                    subprocess.run(
-                        ["tmux", "send-keys", "-t", session, "C-l"],
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    # Force app redraw: send Ctrl+L (universal terminal clear/refresh)
-                    _time.sleep(0.1)
-                    subprocess.run(
-                        ["tmux", "send-keys", "-t", session, "C-l"],
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    # Force the pane to fully clear and redraw
-                    subprocess.run(
-                        ["tmux", "refresh-client", "-S"],
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    # Also resize the pane explicitly
-                    subprocess.run(
-                        [
-                            "tmux",
-                            "resize-pane",
-                            "-t",
-                            session,
-                            "-x",
-                            str(c),
-                            "-y",
-                            str(r),
-                        ],
-                        capture_output=True,
-                        timeout=2,
-                    )
                 except Exception:
                     pass
             else:
