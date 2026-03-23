@@ -872,6 +872,11 @@ function connectAI() {
   // Only bind onData once
   if (!_aiDataBound) {
     _aiTerm.onData(function(d){ try{_aiSock.send(d);}catch(_){} });
+    _aiTerm.onSelectionChange(function(){var s=_aiTerm.getSelection();if(s)navigator.clipboard.writeText(s).catch(function(){});});
+    document.getElementById('ai-term-container').addEventListener('contextmenu',function(e){e.preventDefault();navigator.clipboard.readText().then(function(t){_aiTerm.paste(t);}).catch(function(){});});
+    _aiTerm.parser.registerOscHandler(52, function(data) {
+      try { var b64 = data.split(';')[1]; if (b64) navigator.clipboard.writeText(atob(b64)); } catch(_) {} return true;
+    });
     _aiDataBound = true;
   }
 }

@@ -1211,6 +1211,11 @@ Examples:
         capture_output=True,
         timeout=2,
     )
+    subprocess.run(
+        ["tmux", "set-option", "-t", session, "set-clipboard", "on"],
+        capture_output=True,
+        timeout=2,
+    )
     _active_ai_sessions[uid] = name
     return session
 
