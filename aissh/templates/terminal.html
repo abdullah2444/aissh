@@ -418,7 +418,7 @@ function openPanel(name){
   _activePanel=name;ov.classList.add('open');
   var panel=document.getElementById('panel-'+name);if(panel)panel.classList.add('open');
   document.querySelectorAll('.hdr-tabs .tab').forEach(function(t){if(t.textContent.toLowerCase()===name)t.classList.add('active');});
-  if(name==='services')loadServices();else if(name==='firewall')loadFirewall();else if(name==='files')loadFiles('/');else if(name==='docker')loadDocker();else if(name==='apps')loadApps();else if(name==='ai')initAITerminal();
+  if(name==='services')loadServices();else if(name==='firewall')loadFirewall();else if(name==='files')loadFiles('/');else if(name==='docker')loadDocker();else if(name==='apps')loadApps();else if(name==='ai')checkAndOpenAI();
   return false;
 }
 function closePanel(){
@@ -782,6 +782,26 @@ function fitAI() {
 }
 
 var _aiReady = false;
+
+async function checkAndOpenAI() {
+  try {
+    var r = await fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/status');
+    var d = await r.json();
+    if (d.running && !d.same) {
+      if (!confirm('AI is already running on "'+d.server+'".\n\nSwitch to this server? The other session will be terminated.')) {
+        closePanel();
+        return;
+      }
+      // Kill the other session
+      await fetch('/ai-session/switch', {method:'POST'});
+      // Reset local state if we had one
+      _aiReady = false;
+      _aiDataBound = false;
+      if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
+    }
+  } catch(e) {}
+  initAITerminal();
+}
 
 function initAITerminal() {
   var panel = document.getElementById('panel-ai');

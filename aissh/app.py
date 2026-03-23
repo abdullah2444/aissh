@@ -1239,6 +1239,35 @@ def _find_ai_cli() -> str | None:
     return None
 
 
+# Track which server has an active AI session per user: uid -> server_name
+_active_ai_sessions: dict = {}
+
+
+def _kill_ai_session(uid, name):
+    """Kill the tmux AI session and orphaned processes for a given user+server."""
+    safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+    session = f"aissh_ai_{uid}_{safe_name}"
+    work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session)
+    subprocess.run(
+        ["tmux", "kill-session", "-t", session], capture_output=True, timeout=5
+    )
+    try:
+        for pid_str in os.listdir("/proc"):
+            if not pid_str.isdigit():
+                continue
+            try:
+                cwd = os.readlink(f"/proc/{pid_str}/cwd")
+                if cwd == work_dir:
+                    os.kill(int(pid_str), 9)
+            except (OSError, ValueError):
+                pass
+    except Exception:
+        pass
+    shutil.rmtree(work_dir, ignore_errors=True)
+    if _active_ai_sessions.get(uid) == name:
+        _active_ai_sessions.pop(uid, None)
+
+
 def _ensure_ai_session(uid, name, server, ai_cli):
     """Ensure a tmux session with opencode exists for this user+server. Returns session name."""
     safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
@@ -1355,12 +1384,18 @@ Examples:
         env={**os.environ, "PATH": path_env, "TERM": "xterm-256color"},
         timeout=5,
     )
-    # Hide tmux status bar -- we don't need it, just the opencode UI
+    # Hide tmux status bar
     subprocess.run(
         ["tmux", "set-option", "-t", session, "status", "off"],
         capture_output=True,
         timeout=2,
     )
+    subprocess.run(
+        ["tmux", "set-option", "-t", session, "window-size", "largest"],
+        capture_output=True,
+        timeout=2,
+    )
+    _active_ai_sessions[uid] = name
     return session
 
 
@@ -1533,33 +1568,34 @@ def ws_ai_terminal(ws, name):
             pass
 
 
+@app.route("/servers/<name>/ai-session/status")
+@login_required
+def ai_session_status(name):
+    """Check if AI is running on this or another server."""
+    uid = current_user.id
+    active = _active_ai_sessions.get(uid)
+    if not active:
+        return jsonify({"running": False})
+    return jsonify({"running": True, "server": active, "same": active == name})
+
+
 @app.route("/servers/<name>/ai-session/reset", methods=["POST"])
 @login_required
 def ai_session_reset(name):
     """Kill the tmux AI session and any orphaned opencode/claude processes."""
     uid = current_user.id
-    safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
-    session = f"aissh_ai_{uid}_{safe_name}"
-    work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session)
-    # Kill tmux session first
-    subprocess.run(
-        ["tmux", "kill-session", "-t", session], capture_output=True, timeout=5
-    )
-    # Find and kill any opencode/claude processes whose cwd is our work dir
-    try:
-        for pid_str in os.listdir("/proc"):
-            if not pid_str.isdigit():
-                continue
-            try:
-                cwd = os.readlink(f"/proc/{pid_str}/cwd")
-                if cwd == work_dir:
-                    os.kill(int(pid_str), 9)
-            except (OSError, ValueError):
-                pass
-    except Exception:
-        pass
-    # Clean up work directory
-    shutil.rmtree(work_dir, ignore_errors=True)
+    _kill_ai_session(uid, name)
+    return jsonify({"ok": True})
+
+
+@app.route("/ai-session/switch", methods=["POST"])
+@login_required
+def ai_session_switch():
+    """Kill AI on the current server and prepare for a new one."""
+    uid = current_user.id
+    active = _active_ai_sessions.get(uid)
+    if active:
+        _kill_ai_session(uid, active)
     return jsonify({"ok": True})
 
 
