@@ -1287,60 +1287,56 @@ def ws_ai_terminal(ws, name):
     )
     os.close(slave_fd)
 
-    import queue as _queue
+    try:
+        from gevent.fileobject import FileObject
+        import gevent
+    except ImportError:
+        FileObject = None
 
-    out_q = _queue.Queue()
     stop = threading.Event()
 
-    def _pty_reader():
-        """Read from PTY in a real OS thread, put data into a queue."""
-        import select as _sel
+    if FileObject:
+        # ── Gevent mode (inside gunicorn) ──
+        fobj = FileObject(master_fd, "rb", close=False)
 
-        os.set_blocking(master_fd, False)
-        while not stop.is_set():
+        def _pty_to_ws():
+            while not stop.is_set():
+                try:
+                    chunk = fobj.read1(4096)
+                    if not chunk:
+                        break
+                    ws.send(chunk.decode(errors="replace"))
+                except Exception:
+                    break
+            stop.set()
             try:
-                r, _, _ = _sel.select([master_fd], [], [], 0.05)
-                if r:
-                    data = os.read(master_fd, 16384)
+                ws.close()
+            except Exception:
+                pass
+
+        g = gevent.spawn(_pty_to_ws)
+    else:
+        # ── Fallback: plain thread (dev server) ──
+        def _pty_to_ws():
+            os.set_blocking(master_fd, False)
+            while not stop.is_set():
+                try:
+                    data = os.read(master_fd, 4096)
                     if not data:
                         break
-                    out_q.put(data)
-            except (OSError, ValueError):
-                break
-            if proc.poll() is not None:
-                _time.sleep(0.1)
-                try:
-                    while True:
-                        data = os.read(master_fd, 16384)
-                        if not data:
-                            break
-                        out_q.put(data)
+                    ws.send(data.decode(errors="replace"))
+                except BlockingIOError:
+                    _time.sleep(0.02)
                 except OSError:
-                    pass
-                break
-        out_q.put(None)
-
-    # Real OS thread (bypasses gevent) for PTY I/O
-    import _thread
-
-    _thread.start_new_thread(_pty_reader, ())
-
-    # Greenlet-safe sender: drains queue and writes to WebSocket
-    def _send_loop():
-        while not stop.is_set():
-            try:
-                chunk = out_q.get(timeout=0.05)
-                if chunk is None:
                     break
-                ws.send(chunk.decode(errors="replace"))
-            except _queue.Empty:
-                pass
+            stop.set()
+            try:
+                ws.close()
             except Exception:
-                break
-        stop.set()
+                pass
 
-    sender = threading.Thread(target=_send_loop, daemon=True)
-    sender.start()
+        g = threading.Thread(target=_pty_to_ws, daemon=True)
+        g.start()
 
     try:
         while not stop.is_set():
@@ -1364,83 +1360,8 @@ def ws_ai_terminal(ws, name):
         pass
     finally:
         stop.set()
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-
-    t = threading.Thread(target=_pty_to_ws, daemon=True)
-    t.start()
-
-    try:
-        while not stop.is_set():
-            data = ws.receive()
-            if data is None:
-                break
-            if isinstance(data, str) and data.startswith("RESIZE:"):
-                try:
-                    _, cols, rows = data.split(":")
-                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
-                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                except Exception:
-                    pass
-            else:
-                raw = data if isinstance(data, bytes) else data.encode()
-                try:
-                    os.write(master_fd, raw)
-                except OSError:
-                    break
-    except Exception:
-        pass
-    finally:
-        stop.set()
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
-        try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
-
-    t = threading.Thread(target=_pty_to_ws, daemon=True)
-    t.start()
-
-    try:
-        while not stop.is_set():
-            data = ws.receive()
-            if data is None:
-                break
-            if isinstance(data, str) and data.startswith("RESIZE:"):
-                try:
-                    import fcntl
-                    import termios
-                    import struct
-
-                    _, cols, rows = data.split(":")
-                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
-                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                except Exception:
-                    pass
-            else:
-                raw = data if isinstance(data, bytes) else data.encode()
-                os.write(master_fd, raw)
-    except Exception:
-        pass
-    finally:
-        stop.set()
+        if FileObject and hasattr(g, "kill"):
+            g.kill()
         try:
             os.close(master_fd)
         except OSError:
