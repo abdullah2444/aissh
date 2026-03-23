@@ -1243,8 +1243,35 @@ def _find_ai_cli() -> str | None:
 _active_ai_sessions: dict = {}
 
 
+# Last opencode session ID per (uid, server_name) for resume
+_last_ai_session_ids: dict = {}
+
+
+def _save_last_session_id(uid, name):
+    """Capture the most recent opencode session ID before killing."""
+    ai_cli = _find_ai_cli()
+    if not ai_cli:
+        return
+    try:
+        result = subprocess.run(
+            [ai_cli, "session", "list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        for line in result.stdout.strip().splitlines():
+            line = line.strip()
+            if line.startswith("ses_"):
+                _last_ai_session_ids[(uid, name)] = line.split()[0]
+                return
+    except Exception:
+        pass
+
+
 def _kill_ai_session(uid, name):
     """Kill the tmux AI session and orphaned processes for a given user+server."""
+    # Save session ID before killing so we can resume later
+    _save_last_session_id(uid, name)
     safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     session = f"aissh_ai_{uid}_{safe_name}"
     work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session)
@@ -1263,7 +1290,7 @@ def _kill_ai_session(uid, name):
                 pass
     except Exception:
         pass
-    shutil.rmtree(work_dir, ignore_errors=True)
+    # Don't delete work_dir -- keep CLAUDE.md for resume
     if _active_ai_sessions.get(uid) == name:
         _active_ai_sessions.pop(uid, None)
 
@@ -1369,7 +1396,12 @@ Examples:
     cli_dir = os.path.dirname(ai_cli)
     path_env = cli_dir + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
 
-    launch_cmd = f"export PATH={path_env} && {ai_cli}"
+    # Check if we have a saved session to resume
+    saved_id = _last_ai_session_ids.get((uid, name))
+    if saved_id:
+        launch_cmd = f"export PATH={path_env} && {ai_cli} --session {saved_id}"
+    else:
+        launch_cmd = f"export PATH={path_env} && {ai_cli}"
 
     # Create tmux session running opencode in the work directory
     subprocess.run(
@@ -1576,11 +1608,13 @@ def ai_session_status(name):
     """Check if AI is running on this or another server."""
     uid = current_user.id
     active = _active_ai_sessions.get(uid)
+    has_saved = (uid, name) in _last_ai_session_ids
     return jsonify(
         {
             "running": bool(active),
             "server": active or "",
             "same": active == name,
+            "has_saved_session": has_saved,
         }
     )
 
@@ -1588,9 +1622,25 @@ def ai_session_status(name):
 @app.route("/servers/<name>/ai-session/reset", methods=["POST"])
 @login_required
 def ai_session_reset(name):
-    """Kill the tmux AI session and any orphaned opencode/claude processes."""
+    """Kill the tmux AI session. Saves session ID for later resume."""
     uid = current_user.id
     _kill_ai_session(uid, name)
+    return jsonify({"ok": True})
+
+
+@app.route("/servers/<name>/ai-session/new", methods=["POST"])
+@login_required
+def ai_session_new(name):
+    """Kill session AND clear saved session ID so next open starts fresh."""
+    uid = current_user.id
+    _kill_ai_session(uid, name)
+    _last_ai_session_ids.pop((uid, name), None)
+    # Also delete work dir for a truly fresh start
+    safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+    work_dir = os.path.join(
+        os.path.expanduser("~"), ".aissh_ai_sessions", f"aissh_ai_{uid}_{safe_name}"
+    )
+    shutil.rmtree(work_dir, ignore_errors=True)
     return jsonify({"ok": True})
 
 

@@ -879,10 +879,12 @@ function reconnectAI() {
 }
 
 async function newAISession() {
-  if(!confirm('Start a fresh AI session?')) return;
-  await fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
-  if(_aiTerm) _aiTerm.clear();
-  connectAI();
+  if(!confirm('Start a fresh AI session? Previous conversation will not be resumable.')) return;
+  await fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/new', {method:'POST'});
+  _aiReady = false;
+  _aiDataBound = false;
+  if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
+  initAITerminal();
 }
 
 async function dkPull(){
