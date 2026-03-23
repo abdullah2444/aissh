@@ -725,6 +725,8 @@ function startResize(e, panelId) {
     var delta = _resizing.startX - e.clientX;
     var newW = Math.max(300, Math.min(window.innerWidth - 50, _resizing.startW + delta));
     _resizing.panel.style.width = newW + 'px';
+    // Refit AI terminal live during drag
+    if (panelId === 'panel-ai' && _aiFit) _aiFit.fit();
   }
   function onUp() {
     if (!_resizing) return;
@@ -733,8 +735,7 @@ function startResize(e, panelId) {
     _resizing = null;
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
-    // Refit AI terminal
-    if (panelId === 'panel-ai' && _aiFit) setTimeout(function(){ _aiFit.fit(); }, 50);
+    if (panelId === 'panel-ai' && _aiFit) _aiFit.fit();
   }
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
