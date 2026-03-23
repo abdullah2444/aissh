@@ -42,3 +42,19 @@ AISSH-CONTEXT.md
 
 # OS
 Thumbs.db
+
+# Node
+node_modules/
+package-lock.json
+package.json
+
+# Temp files
+*.patch
+*.orig
+*.rej
+test_*.py
+test_*.js
+test_*.html
+fix_*.sh
+fix_*.patch
+CLAUDE.md
