@@ -1417,7 +1417,13 @@ def ws_ai_terminal(ws, name):
     winsize = struct.pack("HHHH", init_rows, init_cols, 0, 0)
     fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
 
-    # Resize the tmux window to match BEFORE attaching
+    # Set tmux window size options so it doesn't shrink to smallest client
+    subprocess.run(
+        ["tmux", "set-option", "-t", session, "window-size", "largest"],
+        capture_output=True,
+        timeout=2,
+    )
+    # Detach any stale clients, resize window to our PTY size
     subprocess.run(
         [
             "tmux",
@@ -1434,7 +1440,7 @@ def ws_ai_terminal(ws, name):
     )
 
     proc = subprocess.Popen(
-        ["tmux", "attach-session", "-t", session],
+        ["tmux", "attach-session", "-d", "-t", session],
         stdin=slave_fd,
         stdout=slave_fd,
         stderr=slave_fd,
@@ -1499,7 +1505,7 @@ def ws_ai_terminal(ws, name):
                     # Resize the PTY
                     winsize = struct.pack("HHHH", r, c, 0, 0)
                     fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                    # Tell tmux to resize
+                    # Resize tmux window + pane + force redraw
                     subprocess.run(
                         [
                             "tmux",
@@ -1511,6 +1517,26 @@ def ws_ai_terminal(ws, name):
                             "-y",
                             str(r),
                         ],
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    subprocess.run(
+                        [
+                            "tmux",
+                            "resize-pane",
+                            "-t",
+                            session,
+                            "-x",
+                            str(c),
+                            "-y",
+                            str(r),
+                        ],
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    _time.sleep(0.05)
+                    subprocess.run(
+                        ["tmux", "send-keys", "-t", session, "C-l"],
                         capture_output=True,
                         timeout=2,
                     )
