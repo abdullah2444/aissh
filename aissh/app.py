@@ -4,6 +4,7 @@ import json
 import os
 import functools
 import re
+import requests as _requests
 import shutil
 import socket
 import subprocess
@@ -3224,8 +3225,6 @@ def settings():
 # ---------------------------------------------------------------------------
 # DigitalOcean Droplets
 # ---------------------------------------------------------------------------
-
-import requests as _requests
 
 _DO_API = "https://api.digitalocean.com/v2"
 
