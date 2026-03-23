@@ -414,10 +414,18 @@ function openPanel(name){
   return false;
 }
 function closePanel(){
+  // Kill AI session if it was open
+  if (_activePanel === 'ai' && _aiSock) {
+    try { _aiSock.close(); } catch(_){}
+    // Kill the tmux session to free resources
+    fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
+    _aiReady = false;
+    _aiDataBound = false;
+    if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
+  }
   document.querySelectorAll('.side-panel').forEach(function(p){p.classList.remove('open');});
   document.getElementById('sp-overlay').classList.remove('open');
   document.querySelectorAll('.hdr-tabs .tab').forEach(function(t){t.classList.remove('active');});
-  document.querySelector('.hdr-tabs .tab:first-child').classList.add('active');
   _activePanel=null;
 }
 
