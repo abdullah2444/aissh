@@ -125,9 +125,18 @@ body { overflow: hidden; }
   border-left: 1px solid var(--border2);
   box-shadow: -8px 0 40px rgba(0,0,0,.4);
   z-index: 60; display: flex; flex-direction: column;
-  transform: translateX(100%); transition: transform .2s ease;
+  transform: translateX(100%); transition: transform .2s ease, width 0s;
 }
 .side-panel.open { transform: translateX(0); }
+.side-panel.fullscreen { width: 100vw !important; }
+
+/* Resize handle */
+.sp-resize {
+  position: absolute; top: 0; left: -4px; bottom: 0; width: 8px;
+  cursor: col-resize; z-index: 2;
+}
+.sp-resize:hover, .sp-resize.dragging { background: var(--accent); opacity: .3; }
+.sp-resize.dragging { opacity: .5; }
 .sp-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0;
@@ -281,33 +290,40 @@ body { overflow: hidden; }
 
 <!-- Panels -->
 <div class="side-panel" id="panel-services">
-  <div class="sp-head"><h3>Services</h3><button class="sp-close" onclick="closePanel()">&#x2715;</button></div>
+  <div class="sp-resize" onmousedown="startResize(event,'panel-services')"></div>
+  <div class="sp-head"><h3>Services</h3><div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-services')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div></div>
   <div class="sp-body" id="svc-body"></div>
 </div>
 <div class="side-panel" id="panel-firewall">
-  <div class="sp-head"><h3>Firewall</h3><button class="sp-close" onclick="closePanel()">&#x2715;</button></div>
+  <div class="sp-resize" onmousedown="startResize(event,'panel-firewall')"></div>
+  <div class="sp-head"><h3>Firewall</h3><div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-firewall')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div></div>
   <div class="sp-body" id="fw-body"></div>
 </div>
 <div class="side-panel" id="panel-files">
-  <div class="sp-head"><h3>File Manager</h3><button class="sp-close" onclick="closePanel()">&#x2715;</button></div>
+  <div class="sp-resize" onmousedown="startResize(event,'panel-files')"></div>
+  <div class="sp-head"><h3>File Manager</h3><div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-files')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div></div>
   <div class="sp-body" id="fm-body"></div>
 </div>
 <div class="side-panel" id="panel-docker">
-  <div class="sp-head"><h3>Docker</h3><button class="sp-close" onclick="closePanel()">&#x2715;</button></div>
+  <div class="sp-resize" onmousedown="startResize(event,'panel-docker')"></div>
+  <div class="sp-head"><h3>Docker</h3><div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-docker')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div></div>
   <div class="sp-body" id="dk-body"></div>
 </div>
 <div class="side-panel" id="panel-apps">
+  <div class="sp-resize" onmousedown="startResize(event,'panel-apps')"></div>
   <div class="sp-head">
     <h3>Apps &amp; Packages</h3>
-    <button class="sp-close" onclick="closePanel()">&#x2715;</button>
+    <div style="display:flex;gap:4px;align-items:center;"><button class="act-btn" onclick="toggleFullscreen('panel-apps')" title="Fullscreen">&#9634;</button><button class="sp-close" onclick="closePanel()">&#x2715;</button></div>
   </div>
   <div class="sp-body" id="apps-body"></div>
 </div>
 <div class="side-panel" id="panel-ai" style="display:flex;flex-direction:column;">
+  <div class="sp-resize" onmousedown="startResize(event,'panel-ai')"></div>
   <div class="sp-head">
     <h3>AI (OpenCode)</h3>
-    <div style="display:flex;gap:4px;">
+    <div style="display:flex;gap:4px;align-items:center;">
       <button class="act-btn" onclick="reconnectAI()">Reconnect</button>
+      <button class="act-btn" onclick="toggleFullscreen('panel-ai')" title="Toggle fullscreen">&#9634;</button>
       <button class="sp-close" onclick="closePanel()">&#x2715;</button>
     </div>
   </div>
@@ -684,6 +700,44 @@ async function pkgRemove(name){
   var d=await r.json();
   body.innerHTML='<button class="act-btn" onclick="_appsView=\'packages\';loadApps()" style="margin-bottom:6px;">&#8592; Back</button>'
     +'<div class="log-view">'+((d.output||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'))+'</div>';
+}
+
+/* ── Panel resize + fullscreen ── */
+function toggleFullscreen(panelId) {
+  var panel = document.getElementById(panelId);
+  panel.classList.toggle('fullscreen');
+  // Refit AI terminal if it's the AI panel
+  if (panelId === 'panel-ai' && _aiFit) setTimeout(function(){ _aiFit.fit(); }, 50);
+}
+
+var _resizing = null;
+function startResize(e, panelId) {
+  e.preventDefault();
+  var panel = document.getElementById(panelId);
+  var handle = e.target;
+  handle.classList.add('dragging');
+  panel.classList.remove('fullscreen');
+  panel.style.transition = 'none';
+  _resizing = { panel: panel, handle: handle, startX: e.clientX, startW: panel.offsetWidth };
+
+  function onMove(e) {
+    if (!_resizing) return;
+    var delta = _resizing.startX - e.clientX;
+    var newW = Math.max(300, Math.min(window.innerWidth - 50, _resizing.startW + delta));
+    _resizing.panel.style.width = newW + 'px';
+  }
+  function onUp() {
+    if (!_resizing) return;
+    _resizing.handle.classList.remove('dragging');
+    _resizing.panel.style.transition = '';
+    _resizing = null;
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    // Refit AI terminal
+    if (panelId === 'panel-ai' && _aiFit) setTimeout(function(){ _aiFit.fit(); }, 50);
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 /* ── AI Terminal (OpenCode) ── */
