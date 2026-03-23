@@ -1287,37 +1287,79 @@ def ws_ai_terminal(ws, name):
     )
     os.close(slave_fd)
 
-    # Make master_fd non-blocking
-    import fcntl as _fcntl
-
-    flags = _fcntl.fcntl(master_fd, _fcntl.F_GETFL)
-    _fcntl.fcntl(master_fd, _fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
     stop = threading.Event()
 
-    def _pty_to_ws():
-        """Read from PTY master and send to WebSocket."""
+    def _pty_reader():
+        """Read from PTY using raw file descriptor polling."""
+        import select as _sel
+
         while not stop.is_set():
             try:
-                data = os.read(master_fd, 4096)
-                if not data:
-                    break
-                ws.send(data.decode(errors="replace"))
-            except BlockingIOError:
-                _time.sleep(0.02)
-            except OSError:
+                # Use real select (not gevent-patched) on the PTY fd
+                r, _, _ = _sel.select([master_fd], [], [], 0.05)
+                if r:
+                    data = os.read(master_fd, 16384)
+                    if not data:
+                        break
+                    ws.send(data.decode(errors="replace"))
+            except (OSError, ValueError):
                 break
             if proc.poll() is not None:
-                # Process exited, drain remaining output
+                _time.sleep(0.1)
                 try:
                     while True:
-                        data = os.read(master_fd, 4096)
+                        data = os.read(master_fd, 16384)
                         if not data:
                             break
                         ws.send(data.decode(errors="replace"))
-                except (BlockingIOError, OSError):
+                except OSError:
                     pass
                 break
+        stop.set()
+        try:
+            ws.close()
+        except Exception:
+            pass
+
+    # Use a real OS thread (not gevent greenlet) so select() works on the PTY fd
+    import _thread
+
+    _thread.start_new_thread(_pty_reader, ())
+
+    try:
+        while not stop.is_set():
+            data = ws.receive()
+            if data is None:
+                break
+            if isinstance(data, str) and data.startswith("RESIZE:"):
+                try:
+                    _, cols, rows = data.split(":")
+                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
+                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                except Exception:
+                    pass
+            else:
+                raw = data if isinstance(data, bytes) else data.encode()
+                try:
+                    os.write(master_fd, raw)
+                except OSError:
+                    break
+    except Exception:
+        pass
+    finally:
+        stop.set()
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+        try:
+            proc.terminate()
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
         stop.set()
         try:
             ws.close()
