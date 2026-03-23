@@ -1222,7 +1222,7 @@ def ws_terminal(ws, name):
 
 @sock.route("/ws/ai-terminal/<name>")
 def ws_ai_terminal(ws, name):
-    """WebSocket terminal that launches opencode CLI on the remote server."""
+    """WebSocket terminal that runs opencode locally, connected to the remote server via SSH."""
     if not current_user.is_authenticated:
         ws.close()
         return
@@ -1232,42 +1232,68 @@ def ws_ai_terminal(ws, name):
         ws.send("\r\n\x1b[31mServer not found.\x1b[0m\r\n")
         return
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        _ssh_connect(client, server, timeout=10)
-    except Exception as e:
-        ws.send(f"\r\n\x1b[31mSSH connection failed: {e}\x1b[0m\r\n")
+    import pty as _pty
+    import select
+
+    # Build SSH command to connect to the remote server
+    host = server["host"]
+    port = server.get("port", 22)
+    user = server["user"]
+    password = server.get("password", "")
+    pem = server.get("pem_key", "")
+
+    # Build the opencode/claude command that will run locally
+    # It gets an SSH shell into the remote server as its execution environment
+    ssh_target = f"{user}@{host}" + (f" -p {port}" if port != 22 else "")
+
+    # Find which AI CLI is available locally
+    ai_cli = None
+    for cmd in ["opencode", "claude"]:
+        if shutil.which(cmd):
+            ai_cli = cmd
+            break
+
+    if not ai_cli:
+        ws.send(
+            "\r\n\x1b[31mNo AI CLI found on this server.\x1b[0m\r\n"
+            "\r\n  Install OpenCode:  curl -fsSL https://opencode.ai/install | bash\r\n"
+            "  Install Claude:    npm install -g @anthropic-ai/claude-code\r\n"
+        )
         return
 
-    channel = client.invoke_shell(term="xterm-256color", width=120, height=40)
-    channel.setblocking(False)
+    # Spawn a local PTY running the AI CLI
+    # Set AISSH_SSH_TARGET so the AI knows which server to manage
+    env = os.environ.copy()
+    env["AISSH_SSH_HOST"] = host
+    env["AISSH_SSH_PORT"] = str(port)
+    env["AISSH_SSH_USER"] = user
+    env["TERM"] = "xterm-256color"
 
-    # Launch opencode (or claude as fallback) after shell is ready
-    _time.sleep(0.3)
-    channel.send(
-        "command -v opencode >/dev/null 2>&1 && exec opencode || "
-        "(command -v claude >/dev/null 2>&1 && exec claude || "
-        "echo -e '\\033[31mNeither opencode nor claude CLI is installed.\\033[0m\\n"
-        "Install OpenCode: curl -fsSL https://opencode.ai/install | bash\\n"
-        "Install Claude Code: npm install -g @anthropic-ai/claude-code')\r"
+    master_fd, slave_fd = _pty.openpty()
+    proc = subprocess.Popen(
+        [ai_cli],
+        stdin=slave_fd,
+        stdout=slave_fd,
+        stderr=slave_fd,
+        env=env,
+        preexec_fn=os.setsid,
     )
+    os.close(slave_fd)
 
     stop = threading.Event()
 
-    def _ssh_to_ws():
+    def _pty_to_ws():
         while not stop.is_set():
             try:
-                if channel.recv_ready():
-                    data = channel.recv(4096)
+                r, _, _ = select.select([master_fd], [], [], 0.02)
+                if r:
+                    data = os.read(master_fd, 4096)
                     if not data:
                         break
                     ws.send(data.decode(errors="replace"))
-                elif channel.exit_status_ready():
+                if proc.poll() is not None:
                     break
-                else:
-                    _time.sleep(0.01)
-            except Exception:
+            except (OSError, ValueError):
                 break
         stop.set()
         try:
@@ -1275,7 +1301,7 @@ def ws_ai_terminal(ws, name):
         except Exception:
             pass
 
-    t = threading.Thread(target=_ssh_to_ws, daemon=True)
+    t = threading.Thread(target=_pty_to_ws, daemon=True)
     t.start()
 
     try:
@@ -1285,24 +1311,34 @@ def ws_ai_terminal(ws, name):
                 break
             if isinstance(data, str) and data.startswith("RESIZE:"):
                 try:
+                    import fcntl
+                    import termios
+                    import struct
+
                     _, cols, rows = data.split(":")
-                    channel.resize_pty(width=int(cols), height=int(rows))
+                    winsize = struct.pack("HHHH", int(rows), int(cols), 0, 0)
+                    fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
                 except Exception:
                     pass
             else:
-                channel.send(data if isinstance(data, bytes) else data.encode())
+                raw = data if isinstance(data, bytes) else data.encode()
+                os.write(master_fd, raw)
     except Exception:
         pass
     finally:
         stop.set()
         try:
-            channel.close()
-        except Exception:
+            os.close(master_fd)
+        except OSError:
             pass
         try:
-            client.close()
+            proc.terminate()
+            proc.wait(timeout=3)
         except Exception:
-            pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
