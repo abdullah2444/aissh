@@ -55,14 +55,17 @@
   .badge-pem { background: rgba(34,197,94,.08); color: var(--green); border: 1px solid rgba(34,197,94,.2); }
   .badge-pw  { background: rgba(59,130,246,.06); color: var(--accent); border: 1px solid rgba(59,130,246,.15); }
 
-  .card-actions { display: flex; gap: 6px; align-items: center; }
-  .card-actions > a.ctl,
-  .card-actions > div,
-  .card-actions > form { flex: 1; min-width: 0; }
-  .card-actions > a.ctl:first-child { flex: 2; }
-  .card-actions .ctl { font-size: 11.5px; width: 100%; height: 32px; }
-  .card-actions > form { display: flex; }
-  .card-actions > form > .ctl { flex: 1; }
+  .card-actions {
+    display: flex; gap: 6px; align-items: stretch;
+    margin-top: auto;
+  }
+  .card-actions > a.ctl { flex: 2; min-width: 0; }
+  .card-actions > .qa-wrap { flex: 1.5; min-width: 0; }
+  .card-actions > form { flex: 0 0 auto; display: flex; margin: 0; }
+  .card-actions .ctl {
+    font-size: 11.5px; width: 100%; height: 32px;
+    box-sizing: border-box;
+  }
 
   .empty-state { text-align: center; padding: 4rem 1rem; }
   .empty-state p { font-size: 14px; color: var(--muted); margin: 0 0 1.25rem; }
@@ -144,9 +147,11 @@
   .seg-btn:not(.on):hover { background: var(--surface3); color: var(--text); }
 
   /* ── Quick Actions ── */
-  .qa-wrap { position: static; flex: 1; }
+  .qa-wrap { position: relative; display: flex; }
+  .qa-wrap > .qa-toggle { flex: 1; }
   .qa-menu {
-    position: fixed; z-index: 9999;
+    position: absolute; z-index: 9999;
+    top: calc(100% + 4px); right: 0; left: 0;
     background: var(--surface); border: 1px solid var(--border2);
     border-radius: 8px; padding: 4px;
     box-shadow: 0 8px 28px rgba(0,0,0,.5);
@@ -193,6 +198,10 @@
 
   @media (max-width: 520px) {
     .page-hdr { flex-wrap: wrap; }
+    .card-actions { flex-wrap: wrap; }
+    .card-actions > a.ctl { flex: 1 1 calc(50% - 3px); }
+    .card-actions > .qa-wrap { flex: 1 1 calc(50% - 3px); }
+    .card-actions > form { flex: 0 0 auto; }
     .form-grid { grid-template-columns: 1fr !important; }
     .src-dst-grid { grid-template-columns: 1fr !important; }
   }
@@ -230,7 +239,7 @@
       <a href="{{ url_for('chat_page', name=s.name) }}" class="ctl active">Terminal</a>
       <a href="{{ url_for('servers_edit', name=s.name) }}" class="ctl">Edit</a>
       <div class="qa-wrap">
-        <button type="button" class="ctl qa-toggle" style="width:100%">Actions &#9662;</button>
+        <button type="button" class="ctl qa-toggle">Actions &#9662;</button>
         <div class="qa-menu">
           <button data-srv="{{ s.name }}" data-act="uptime">System Info</button>
           <button data-srv="{{ s.name }}" data-act="disk">Disk Usage</button>
@@ -393,9 +402,6 @@ document.addEventListener('click', function(e) {
     var wasOpen = menu.classList.contains('show');
     document.querySelectorAll('.qa-menu.show').forEach(function(m){ m.classList.remove('show'); });
     if (!wasOpen) {
-      var rect = toggle.getBoundingClientRect();
-      menu.style.top = (rect.bottom + 4) + 'px';
-      menu.style.left = rect.left + 'px';
       menu.classList.add('show');
     }
     return;
