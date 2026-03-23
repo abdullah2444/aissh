@@ -7,8 +7,8 @@ import multiprocessing
 bind = "0.0.0.0:5002"
 
 # Workers
-# gevent is required because flask-sock uses WebSocket which needs async I/O
-worker_class = "geventwebsocket.gunicorn.workers.GeventWebSocketWorker"
+# gevent is required for WebSocket (flask-sock + simple-websocket) support
+worker_class = "gevent"
 workers = multiprocessing.cpu_count() + 1
 worker_connections = 200
 timeout = 120
