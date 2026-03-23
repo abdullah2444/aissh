@@ -2765,28 +2765,44 @@ def droplets_page():
     if token:
         try:
             # Fetch droplets
-            r = _do_request('GET', f"{_DO_API}/droplets?per_page=200", _do_headers(token), timeout=10)
+            r = _do_request(
+                "GET",
+                f"{_DO_API}/droplets?per_page=200",
+                _do_headers(token),
+                timeout=10,
+            )
             if r.status_code == 200:
                 droplets = r.json().get("droplets", [])
             else:
                 error = f"Failed to fetch droplets: {r.status_code}"
 
             # Fetch regions, sizes, images, vpcs in parallel-ish
-            rr = _do_request('GET', f"{_DO_API}/regions?per_page=200", _do_headers(token), timeout=10)
+            rr = _do_request(
+                "GET", f"{_DO_API}/regions?per_page=200", _do_headers(token), timeout=10
+            )
             if rr.status_code == 200:
                 regions = [
                     r for r in rr.json().get("regions", []) if r.get("available")
                 ]
 
-            rs = _do_request('GET', f"{_DO_API}/sizes?per_page=200", _do_headers(token), timeout=10)
+            rs = _do_request(
+                "GET", f"{_DO_API}/sizes?per_page=200", _do_headers(token), timeout=10
+            )
             if rs.status_code == 200:
                 sizes = rs.json().get("sizes", [])
 
-            ri = _do_request('GET', f"{_DO_API}/images?type=distribution&per_page=200", _do_headers(token), timeout=10)
+            ri = _do_request(
+                "GET",
+                f"{_DO_API}/images?type=distribution&per_page=200",
+                _do_headers(token),
+                timeout=10,
+            )
             if ri.status_code == 200:
                 images = ri.json().get("images", [])
 
-            rv = _do_request('GET', f"{_DO_API}/vpcs?per_page=200", _do_headers(token), timeout=10)
+            rv = _do_request(
+                "GET", f"{_DO_API}/vpcs?per_page=200", _do_headers(token), timeout=10
+            )
             if rv.status_code == 200:
                 vpcs = rv.json().get("vpcs", [])
 
@@ -2838,7 +2854,13 @@ def droplets_create():
         return redirect(url_for("droplets_page"))
 
     try:
-        r = _do_request('POST', f"{_DO_API}/droplets", _do_headers(token), json_data=payload, timeout=15)
+        r = _do_request(
+            "POST",
+            f"{_DO_API}/droplets",
+            _do_headers(token),
+            json_data=payload,
+            timeout=15,
+        )
         if r.status_code in (201, 202):
             d = r.json().get("droplet", {})
             flash(
@@ -2864,7 +2886,9 @@ def droplets_delete(droplet_id):
         return redirect(url_for("settings"))
 
     try:
-        r = _do_request('DELETE', f"{_DO_API}/droplets/{droplet_id}", _do_headers(token), timeout=10)
+        r = _do_request(
+            "DELETE", f"{_DO_API}/droplets/{droplet_id}", _do_headers(token), timeout=10
+        )
         if r.status_code == 204:
             flash("Droplet deleted.", "success")
         else:
@@ -2887,7 +2911,9 @@ def droplets_add_server(droplet_id):
         return redirect(url_for("droplets_page"))
 
     try:
-        r = _do_request('GET', f"{_DO_API}/droplets/{droplet_id}", _do_headers(token), timeout=10)
+        r = _do_request(
+            "GET", f"{_DO_API}/droplets/{droplet_id}", _do_headers(token), timeout=10
+        )
         if r.status_code != 200:
             flash("Could not fetch droplet info.", "error")
             return redirect(url_for("droplets_page"))
@@ -2909,23 +2935,27 @@ def droplets_add_server(droplet_id):
     name = d.get("name", f"do-{droplet_id}")
     password = request.form.get("password", "").strip()
     servers = load_servers(uid)
-    # Check for duplicate
-    if any(s["host"] == ip for s in servers):
-        flash(f"Server with IP {ip} already exists.", "error")
-        return redirect(url_for("droplets_page"))
-
-    servers.append(
-        {
-            "name": name,
-            "host": ip,
-            "port": 22,
-            "user": "root",
-            "password": password,
-            "pem_key": "",
-        }
-    )
-    save_servers(uid, servers)
-    flash(f"Server '{name}' ({ip}) added.", "success")
+    # Update existing or add new
+    existing = next((s for s in servers if s["host"] == ip), None)
+    if existing:
+        if password:
+            existing["password"] = password
+        existing["name"] = name
+        save_servers(uid, servers)
+        flash(f"Server '{name}' ({ip}) updated.", "success")
+    else:
+        servers.append(
+            {
+                "name": name,
+                "host": ip,
+                "port": 22,
+                "user": "root",
+                "password": password,
+                "pem_key": "",
+            }
+        )
+        save_servers(uid, servers)
+        flash(f"Server '{name}' ({ip}) added.", "success")
     return redirect(url_for("droplets_page"))
 
 
@@ -2938,7 +2968,13 @@ def droplets_reboot(droplet_id):
         flash("DigitalOcean API token not configured.", "error")
         return redirect(url_for("droplets_page"))
     try:
-        r = _do_request('POST', f"{_DO_API}/droplets/{droplet_id}/actions", _do_headers(token), json_data={"type": "reboot"}, timeout=10)
+        r = _do_request(
+            "POST",
+            f"{_DO_API}/droplets/{droplet_id}/actions",
+            _do_headers(token),
+            json_data={"type": "reboot"},
+            timeout=10,
+        )
         if r.status_code in (200, 201):
             flash("Reboot initiated.", "success")
         else:

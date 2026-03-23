@@ -159,10 +159,8 @@
       <td style="font-size:12px;color:var(--muted);">{{ d.vcpus }}vCPU / {{ d.memory }}MB / {{ d.disk }}GB</td>
       <td>
         <div class="d-actions">
-          {% if ns.ip and ns.ip not in existing_servers %}
-          <button type="button" class="btn-sm accent" onclick="showAddServer({{ d.id }}, {{ d.name | tojson }}, '{{ ns.ip }}')">Add to Servers</button>
-          {% elif ns.ip and ns.ip in existing_servers %}
-          <span class="btn-sm" style="opacity:.5;cursor:default;">Added</span>
+          {% if ns.ip %}
+          <button type="button" class="btn-sm{% if ns.ip not in existing_servers %} accent{% endif %}" onclick="showAddServer({{ d.id }}, {{ d.name | tojson }}, '{{ ns.ip }}')">{% if ns.ip in existing_servers %}Update{% else %}Add to Servers{% endif %}</button>
           {% endif %}
           <form method="post" action="{{ url_for('droplets_reboot', droplet_id=d.id) }}">
             <button type="submit" class="btn-sm" onclick="return confirm('Reboot ' + {{ d.name | tojson }} + '?')">Reboot</button>
