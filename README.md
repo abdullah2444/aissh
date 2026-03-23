@@ -1,187 +1,140 @@
-# AISSH - SSH Server Manager
+# AISSH - AI SSH Server Manager
 
-A web-based SSH server management tool. Connect to your Linux servers from the browser with a full terminal, live stats, file manager, service controls, and more.
+Web-based server management with an integrated AI assistant. Manage your Linux servers from the browser -- terminal, files, services, Docker, firewall, and AI-powered assistance all in one place.
 
 ## Features
 
-- **Web Terminal** - Full xterm.js terminal with copy/paste, clickable links, 10k scrollback
-- **Multi-Server Terminal** - Split-pane view, broadcast commands to all servers at once
-- **Live Stats** - CPU, RAM, disk, network, load, uptime - refreshed every 2 seconds
-- **Quick Actions** - One-click system info, disk usage, memory, processes, ports, reboot, package updates
-- **Service Manager** - List, start, stop, restart systemd services. View logs per service
-- **Firewall Manager** - View and edit UFW rules, add/delete ports, enable/disable
-- **File Manager** - Browse, upload, download, edit files over SFTP
-- **Docker Manager** - List containers, start/stop/restart, view logs and stats, pull images
-- **App Manager** - Detect running apps (node, python, gunicorn, etc.), view logs, restart, kill
-- **Package Manager** - Search, install, remove system packages
-- **Command Bookmarks** - Save frequently used commands per server, one-click execute
-- **Server Migration** - Rsync-based migration between servers with real-time progress
-- **DigitalOcean Integration** - Create, manage, and connect to droplets
-- **Multi-User Auth** - Admin panel, user management, per-user server configs
-- **Snapshots** - Backup and restore /etc configuration
+### Terminal
+- **Web Terminal** -- Full xterm.js v5 terminal with copy/paste, clickable links, 10k scrollback
+- **Multi-Server Terminal** -- Split-pane view with 1/2/4 column layouts, broadcast commands to all servers at once
+- **Command Bookmarks** -- Save frequently used commands per server, one-click execute from a toolbar
 
-## Quick Start (Docker)
+### Server Management
+- **Live Stats** -- CPU, RAM, disk, network, load, uptime, connections -- refreshed every 2 seconds
+- **Quick Actions** -- One-click system info, disk usage, memory, processes, ports, package updates, reboot -- results displayed in clean tables
+- **Service Manager** -- List, start, stop, restart systemd services, view logs per service
+- **Firewall Manager** -- View/edit UFW rules, add/delete ports, enable/disable firewall
+- **File Manager** -- Browse, upload, download, edit files over SFTP with breadcrumb navigation
+- **Docker Manager** -- List containers, start/stop/restart, view logs and live stats, pull images
+- **App Manager** -- Auto-detect running apps (Node, Python, Gunicorn, Nginx, etc.), view logs, restart, kill processes
+- **Package Manager** -- Search, install, remove system packages (apt/yum)
 
-The fastest way to run AISSH on any Linux or Mac machine.
+### AI Assistant
+- **OpenCode Integration** -- Full OpenCode CLI runs in a side panel, can manage your server with AI
+- **Per-Server Sessions** -- Each server has its own isolated AI session with conversation history
+- **Session Persistence** -- Close and reopen the AI panel to resume your conversation
+- **Resizable Panel** -- Drag to resize or go fullscreen, minimize to keep AI running in background
 
-### 1. Clone the repo
+### Infrastructure
+- **Server Migration** -- Rsync-based migration between servers with protected system files, real-time progress
+- **DigitalOcean Integration** -- Create, manage, reboot, and destroy droplets directly
+- **Snapshots** -- Backup and restore /etc configuration
+- **Multi-User Auth** -- Admin panel, user management, per-user server configs
+
+## Install
+
+### One Command (Linux)
 
 ```bash
 git clone https://github.com/abdullah2444/aissh.git
 cd aissh
+bash install.sh
 ```
 
-### 2. Create an environment file
+The install script sets up Python, venv, Gunicorn, Nginx, and systemd. The admin password is printed on first run.
+
+To reset the admin password:
 
 ```bash
+bash install.sh --reset
+```
+
+### Docker
+
+```bash
+git clone https://github.com/abdullah2444/aissh.git
+cd aissh
 echo "FLASK_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(24))')" > .env
-```
-
-### 3. Start with Docker Compose
-
-```bash
 docker compose up -d
-```
-
-### 4. Open in browser
-
-```
-http://your-server-ip:5002
-```
-
-The admin password is printed in the container logs on first run:
-
-```bash
 docker compose logs aissh | grep "Password"
 ```
 
-### 5. Change the default password
-
-Go to **Settings** and change the admin password immediately.
-
----
-
-## Manual Install (Linux)
-
-For bare-metal deployment with Gunicorn + Nginx + systemd.
-
-### 1. Clone and setup
+### Mac (Development)
 
 ```bash
-git clone https://github.com/abdullah2444/aissh.git /root/aissh
-cd /root/aissh
-```
-
-### 2. Create virtual environment
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 3. Run the deploy script
-
-This installs the systemd service, configures Nginx, and starts everything:
-
-```bash
+git clone https://github.com/abdullah2444/aissh.git
 cd aissh
-bash deploy.sh
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cd aissh && python3 app.py
 ```
 
-### 4. Check the admin password
+Open `http://127.0.0.1:5002`
+
+## Update
 
 ```bash
-journalctl -u aissh | grep "Password"
+cd /root/aissh && git pull && systemctl restart aissh
 ```
 
-### 5. Access
-
-```
-http://your-server-ip
-```
-
-### 6. Add SSL (optional)
+## SSL
 
 ```bash
 apt install certbot python3-certbot-nginx
 certbot --nginx -d yourdomain.com
 ```
 
----
+## AI Setup
 
-## Manual Install (Mac - Development)
-
-### 1. Clone and setup
+The AI tab runs [OpenCode](https://opencode.ai) in a side panel. Install it on the AISSH host:
 
 ```bash
-git clone https://github.com/abdullah2444/aissh.git
-cd aissh
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+curl -fsSL https://opencode.ai/install | bash
 ```
 
-### 2. Run
-
-```bash
-cd aissh
-python3 app.py
-```
-
-### 3. Open
-
-```
-http://127.0.0.1:5002
-```
-
----
+Each server gets its own isolated AI session. The AI knows which server it's managing and wraps all commands with SSH automatically.
 
 ## Configuration
 
-### Environment Variables
-
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `FLASK_SECRET_KEY` | Session encryption key (required for Docker) | Auto-generated |
-| `AISSH_ADMIN_PASSWORD` | Override default admin password on first run | Random |
-| `AISSH_TERMINAL_HOST` | External terminal service host | `127.0.0.1` |
-| `AISSH_TERMINAL_PORT` | External terminal service port | `3000` |
+| `FLASK_SECRET_KEY` | Session encryption key | Auto-generated |
+| `AISSH_ADMIN_PASSWORD` | Override admin password on first run | Random |
 
-### Adding Servers
+## Architecture
 
-1. Log in to AISSH
-2. Click **+ Add Server** on the Servers page
-3. Enter the server name, host/IP, port, username
-4. Choose **Password** or **PEM Key** authentication
-5. Click **Add Server**
+```
+Browser  -->  Nginx (port 80/443)  -->  Gunicorn (gevent)  -->  Flask app
+                                              |
+                                        systemd (auto-restart, boot)
+```
 
-### File Structure
+- **WebSocket terminal** via flask-sock + simple-websocket
+- **SSH connections** via paramiko with connection pooling
+- **AI sessions** via tmux + OpenCode CLI with isolated HOME per server
+- **Stats** via background threads polling servers every 2 seconds
+- **File operations** via SFTP through paramiko
+
+## File Structure
 
 ```
 aissh/
-  app.py              # Main application
-  gunicorn.conf.py    # Gunicorn config (production)
-  aissh.service       # Systemd service file
-  aissh.nginx.conf    # Nginx reverse proxy config
-  deploy.sh           # One-command deployment script
-  templates/          # HTML templates
-  data/               # User data (gitignored)
-Dockerfile            # Docker build
-docker-compose.yml    # Docker Compose config
+  app.py              # Main application (~4000 lines)
+  gunicorn.conf.py    # Production server config
+  templates/          # 10 HTML templates
+  data/               # User data, server configs (gitignored)
+install.sh            # One-command installer
+Dockerfile            # Container build
+docker-compose.yml    # Container orchestration
 requirements.txt      # Python dependencies
 ```
 
-## Requirements
+## Security
 
-- Python 3.10+
-- SSH access to target servers (password or PEM key)
-- Docker (optional, for containerized deployment)
-
-## Security Notes
-
-- All SSH credentials are stored locally in `data/` (never committed to git)
-- Sessions are encrypted with a secret key
+- SSH credentials stored locally in `data/` -- never committed to git
+- Random admin password generated on first run
 - Minimum 8-character passwords enforced
-- Security headers set on all responses (X-Content-Type-Options, X-Frame-Options, Referrer-Policy)
+- Security headers on all responses
 - File uploads limited to 50MB
+- Input sanitization on all SSH commands (snapshot labels, service names, firewall rules)
+- Protected system files excluded from server migration
