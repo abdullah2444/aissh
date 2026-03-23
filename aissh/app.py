@@ -1536,15 +1536,29 @@ def ws_ai_terminal(ws, name):
 @app.route("/servers/<name>/ai-session/reset", methods=["POST"])
 @login_required
 def ai_session_reset(name):
-    """Kill the tmux AI session so next connect starts fresh."""
+    """Kill the tmux AI session and any orphaned opencode/claude processes."""
     uid = current_user.id
     safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     session = f"aissh_ai_{uid}_{safe_name}"
+    work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session)
+    # Kill tmux session first
     subprocess.run(
         ["tmux", "kill-session", "-t", session], capture_output=True, timeout=5
     )
+    # Find and kill any opencode/claude processes whose cwd is our work dir
+    try:
+        for pid_str in os.listdir("/proc"):
+            if not pid_str.isdigit():
+                continue
+            try:
+                cwd = os.readlink(f"/proc/{pid_str}/cwd")
+                if cwd == work_dir:
+                    os.kill(int(pid_str), 9)
+            except (OSError, ValueError):
+                pass
+    except Exception:
+        pass
     # Clean up work directory
-    work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session)
     shutil.rmtree(work_dir, ignore_errors=True)
     return jsonify({"ok": True})
 
