@@ -1341,6 +1341,7 @@ Examples:
     path_env = cli_dir + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
 
     # Create tmux session running opencode in the work directory
+    # No -x/-y -- let the first attach set the size
     subprocess.run(
         [
             "tmux",
@@ -1350,10 +1351,6 @@ Examples:
             session,
             "-c",
             work_dir,
-            "-x",
-            "120",
-            "-y",
-            "40",
             f"export PATH={path_env} && {ai_cli}",
         ],
         env={**os.environ, "PATH": path_env, "TERM": "xterm-256color"},
@@ -1419,6 +1416,22 @@ def ws_ai_terminal(ws, name):
     master_fd, slave_fd = _pty.openpty()
     winsize = struct.pack("HHHH", init_rows, init_cols, 0, 0)
     fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+    # Resize the tmux window to match BEFORE attaching
+    subprocess.run(
+        [
+            "tmux",
+            "resize-window",
+            "-t",
+            session,
+            "-x",
+            str(init_cols),
+            "-y",
+            str(init_rows),
+        ],
+        capture_output=True,
+        timeout=2,
+    )
 
     proc = subprocess.Popen(
         ["tmux", "attach-session", "-t", session],
