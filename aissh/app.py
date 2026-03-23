@@ -1268,7 +1268,7 @@ def _kill_ai_session(uid, name):
         _active_ai_sessions.pop(uid, None)
 
 
-def _ensure_ai_session(uid, name, server, ai_cli):
+def _ensure_ai_session(uid, name, server, ai_cli, resume=False):
     """Ensure a tmux session with opencode exists for this user+server. Returns session name."""
     safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     session = f"aissh_ai_{uid}_{safe_name}"
@@ -1369,6 +1369,11 @@ Examples:
     cli_dir = os.path.dirname(ai_cli)
     path_env = cli_dir + ":" + os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
 
+    # Build opencode launch command with optional --continue flag
+    launch_cmd = f"export PATH={path_env} && {ai_cli}"
+    if resume:
+        launch_cmd = f"export PATH={path_env} && {ai_cli} --continue"
+
     # Create tmux session running opencode in the work directory
     subprocess.run(
         [
@@ -1379,7 +1384,7 @@ Examples:
             session,
             "-c",
             work_dir,
-            f"export PATH={path_env} && {ai_cli}",
+            launch_cmd,
         ],
         env={**os.environ, "PATH": path_env, "TERM": "xterm-256color"},
         timeout=5,
@@ -1435,19 +1440,25 @@ def ws_ai_terminal(ws, name):
     except ImportError:
         FileObject = None
 
-    # Wait for initial size from frontend
+    # Wait for initial message from frontend: "RESIZE:cols:rows" or "RESUME:cols:rows"
     init_cols, init_rows = 120, 40
+    resume_session = False
     try:
         first_msg = ws.receive(timeout=5)
-        if first_msg and isinstance(first_msg, str) and first_msg.startswith("RESIZE:"):
-            _, c, r = first_msg.split(":")
-            init_cols, init_rows = int(c), int(r)
+        if first_msg and isinstance(first_msg, str):
+            if first_msg.startswith("RESUME:"):
+                resume_session = True
+                _, c, r = first_msg.split(":")
+                init_cols, init_rows = int(c), int(r)
+            elif first_msg.startswith("RESIZE:"):
+                _, c, r = first_msg.split(":")
+                init_cols, init_rows = int(c), int(r)
     except Exception:
         pass
 
     # Ensure tmux session exists (creates if needed, reuses if exists)
     try:
-        session = _ensure_ai_session(uid, name, server, ai_cli)
+        session = _ensure_ai_session(uid, name, server, ai_cli, resume=resume_session)
     except Exception as e:
         ws.send(f"\r\n\x1b[31mFailed to create AI session: {e}\x1b[0m\r\n")
         return
@@ -1571,12 +1582,22 @@ def ws_ai_terminal(ws, name):
 @app.route("/servers/<name>/ai-session/status")
 @login_required
 def ai_session_status(name):
-    """Check if AI is running on this or another server."""
+    """Check if AI is running on this or another server, and if a previous session exists."""
     uid = current_user.id
     active = _active_ai_sessions.get(uid)
-    if not active:
-        return jsonify({"running": False})
-    return jsonify({"running": True, "server": active, "same": active == name})
+    # Check if opencode has previous sessions in this server's work dir
+    safe_name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+    session_name = f"aissh_ai_{uid}_{safe_name}"
+    work_dir = os.path.join(os.path.expanduser("~"), ".aissh_ai_sessions", session_name)
+    has_previous = os.path.isdir(work_dir)
+    return jsonify(
+        {
+            "running": bool(active),
+            "server": active or "",
+            "same": active == name,
+            "has_previous": has_previous,
+        }
+    )
 
 
 @app.route("/servers/<name>/ai-session/reset", methods=["POST"])

@@ -328,8 +328,8 @@ body { overflow: hidden; }
   <div class="sp-head">
     <h3>AI (OpenCode)</h3>
     <div style="display:flex;gap:4px;align-items:center;">
-      <button class="act-btn" onclick="reconnectAI()" title="Reattach to session">Reattach</button>
-      <button class="act-btn" onclick="newAISession()" title="Start fresh session" style="color:var(--yellow);">New</button>
+      <button class="act-btn" id="ai-resume-btn" onclick="resumeAI()" title="Resume previous session" style="display:none;color:var(--green);">Resume</button>
+      <button class="act-btn" onclick="newAISession()" title="Start fresh session">New</button>
       <button class="act-btn" onclick="toggleFullscreen('panel-ai')" title="Toggle fullscreen">&#9634;</button>
       <button class="sp-close" onclick="closePanel()" title="Minimize (AI keeps running)">&#8722;</button>
       <button class="sp-close" onclick="killAI()" title="Close and terminate AI" style="color:var(--red);">&#x2715;</button>
@@ -776,7 +776,7 @@ function fitAI() {
     if (_aiResizeTimer) clearTimeout(_aiResizeTimer);
     _aiResizeTimer = setTimeout(function() {
       _aiTerm.clear();
-      connectAI();
+      connectAI(false);
     }, 300);
   }
 }
@@ -792,13 +792,14 @@ async function checkAndOpenAI() {
         closePanel();
         return;
       }
-      // Kill the other session
       await fetch('/ai-session/switch', {method:'POST'});
-      // Reset local state if we had one
       _aiReady = false;
       _aiDataBound = false;
       if (_aiTerm) { _aiTerm.dispose(); _aiTerm = null; _aiFit = null; }
     }
+    // Show/hide resume button based on whether previous session exists
+    var resumeBtn = document.getElementById('ai-resume-btn');
+    if (resumeBtn) resumeBtn.style.display = d.has_previous ? '' : 'none';
   } catch(e) {}
   initAITerminal();
 }
@@ -839,7 +840,7 @@ function initAITerminal() {
     _aiFit.fit();
     _aiReady = true;
     if (!_aiSock || _aiSock.readyState !== WebSocket.OPEN) {
-      connectAI();
+      connectAI(false);
     } else {
       fitAI();
     }
@@ -851,8 +852,8 @@ function initAITerminal() {
   }, 400);
 }
 
-var _aiDataBound = false;
-function connectAI() {
+var _aiDataBound = false, _aiResume = false;
+function connectAI(resume) {
   if (_aiSock) try { _aiSock.close(); } catch(_){}
   var proto = location.protocol==='https:'?'wss':'ws';
   _aiSock = new WebSocket(proto+'://'+location.host+'/ws/ai-terminal/'+encodeURIComponent(SRV));
@@ -860,7 +861,8 @@ function connectAI() {
   _aiSock.onopen = function(){
     var cols = _aiTerm ? _aiTerm.cols : 80;
     var rows = _aiTerm ? _aiTerm.rows : 24;
-    _aiSock.send('RESIZE:'+Math.max(cols,40)+':'+Math.max(rows,10));
+    var prefix = resume ? 'RESUME' : 'RESIZE';
+    _aiSock.send(prefix+':'+Math.max(cols,40)+':'+Math.max(rows,10));
     _setAIDot(true);
   };
   _aiSock.onmessage = function(e){
@@ -878,14 +880,23 @@ function connectAI() {
 
 function reconnectAI() {
   if(_aiTerm) _aiTerm.clear();
-  connectAI();
+  connectAI(false);
+}
+
+function resumeAI() {
+  // Kill current tmux if any, then reconnect with --continue flag
+  fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'}).then(function(){
+    if(_aiTerm) _aiTerm.clear();
+    _aiReady = false;
+    connectAI(true);
+  });
 }
 
 async function newAISession() {
-  if(!confirm('Kill the current AI session and start fresh?')) return;
+  if(!confirm('Start a fresh AI session?')) return;
   await fetch('/servers/'+encodeURIComponent(SRV)+'/ai-session/reset', {method:'POST'});
   if(_aiTerm) _aiTerm.clear();
-  connectAI();
+  connectAI(false);
 }
 
 async function dkPull(){
