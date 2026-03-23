@@ -1,0 +1,14 @@
+# Core
+flask>=3.0
+flask-sock>=0.7
+flask-login>=0.6
+werkzeug>=3.0
+python-dotenv>=1.0
+paramiko>=3.0
+PySocks>=1.7
+requests>=2.31
+
+# Production server
+gunicorn>=22.0
+gevent>=24.0
+gevent-websocket>=0.10

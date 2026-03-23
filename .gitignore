@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+
+# Environment and secrets
+.env
+*.env
+
+# App data (contains credentials and user data)
+app_settings.json
+users.json
+data/
+chats/
+memories/
+
+# V2Ray binaries and config
+v2ray/
+v2ray_config.json
+v2ray_client.py
+
+# Dead code from old version
+ssh_agent.py
+AISSH-CONTEXT.md
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+.ruff_cache/
+
+# OS
+Thumbs.db

@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Settings -- AI SSH Helper{% endblock %}
+{% block head %}
+<style>
+  .set-hdr { margin-bottom: 1.5rem; }
+  .set-hdr h2 { font-size: 1.1rem; font-weight: 700; margin: 0 0 4px; }
+  .set-hdr p { color: var(--muted); font-size: 12.5px; margin: 0; }
+
+  .set-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 820px; align-items: start; }
+  @media (max-width: 640px) { .set-grid { grid-template-columns: 1fr; } }
+
+  .sc {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px;
+  }
+  .sc h3 {
+    margin: 0 0 14px; font-size: 12px; font-weight: 700;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+    padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .sc h3 .ico {
+    width: 20px; height: 20px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; flex-shrink: 0;
+  }
+  .sc label { font-size: 12px; }
+  .sc button[type="submit"] { margin-top: 6px; }
+  .s-col { display: flex; flex-direction: column; gap: 10px; }
+
+  .key-row { display: flex; gap: 8px; align-items: flex-end; }
+  .key-row label { flex: 1; margin: 0; }
+  .key-row button[type="submit"] { flex-shrink: 0; }
+  .key-val { font-size: 10.5px; color: var(--muted); font-family: monospace; margin-top: 4px; display: block; }
+
+  .sc input[type="password"],
+  .sc input[type="text"] { height: 32px; }
+  .sc select { height: 32px; }
+
+  .provider-status { font-size: 12px; color: var(--muted); margin: 0; }
+  .provider-status strong { color: var(--accent); }
+
+  @keyframes cc-spin { to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="set-hdr">
+  <h2>Settings</h2>
+  <p>Manage your account, API keys and AI model.</p>
+</div>
+
+{% if msg   %}<p class="flash-success">{{ msg }}</p>{% endif %}
+{% if error %}<p class="flash-error">{{ error }}</p>{% endif %}
+
+<div class="set-grid">
+  <!-- Password -->
+  <div class="sc">
+    <h3><span class="ico" style="background:rgba(59,130,246,.08);color:var(--accent);">&#128274;</span> Password</h3>
+    <form method="post">
+      <input type="hidden" name="action" value="password">
+      <label>Current Password <input type="password" name="current_password" required></label>
+      <label style="margin-top:8px;">New Password <small>(min 8)</small> <input type="password" name="new_password" required minlength="8"></label>
+      <label style="margin-top:8px;">Confirm <input type="password" name="confirm_password" required minlength="8"></label>
+      <button type="submit" style="margin-top:12px;">Update Password</button>
+    </form>
+  </div>
+
+  <div class="s-col">
+    <!-- AI Model -->
+    <div class="sc">
+      <h3><span class="ico" style="background:rgba(34,197,94,.08);color:var(--green);">AI</span> AI Model</h3>
+      <label style="margin:0;">
+        <select id="model-select" onchange="switchModel(this.value)" style="height:34px;">
+          {% for m in model_options %}
+          <option value="{{ m.id }}" {% if m.id == model %}selected{% endif %}>{{ m.label }}{% if m.provider == 'deepseek' %} (DS){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="provider-status" style="margin-top:8px;">Powered by <strong>Claude CLI</strong></p>
+    </div>
+
+    <!-- Anthropic Key -->
+    <div class="sc">
+      <h3><span class="ico" style="background:rgba(59,130,246,.08);color:var(--accent);">&#9889;</span> Anthropic API Key</h3>
+      <form method="post">
+        <input type="hidden" name="action" value="apikey">
+        <div class="key-row">
+          <label>API Key
+            {% if has_key %}<input type="text" name="api_key" placeholder="{{ masked_key }}" autocomplete="off">
+            {% else %}<input type="text" name="api_key" placeholder="sk-ant-..." required autocomplete="off">{% endif %}
+            {% if has_key %}<span class="key-val">{{ masked_key }}</span>{% endif %}
+          </label>
+          <button type="submit">Save</button>
+        </div>
+        {% if has_key %}<small>Leave blank to keep current key.</small>{% endif %}
+      </form>
+    </div>
+
+    <!-- DeepSeek Key -->
+    <div class="sc">
+      <h3><span class="ico" style="background:rgba(234,179,8,.08);color:var(--yellow);">&#9889;</span> DeepSeek API Key</h3>
+      <form method="post">
+        <input type="hidden" name="action" value="deepseekkey">
+        <div class="key-row">
+          <label>API Key
+            {% if has_ds_key %}<input type="text" name="deepseek_key" placeholder="{{ ds_masked_key }}" autocomplete="off">
+            {% else %}<input type="text" name="deepseek_key" placeholder="sk-..." required autocomplete="off">{% endif %}
+            {% if has_ds_key %}<span class="key-val">{{ ds_masked_key }}</span>{% endif %}
+          </label>
+          <button type="submit">Save</button>
+        </div>
+        {% if has_ds_key %}<small>Leave blank to keep current key.</small>{% endif %}
+      </form>
+    </div>
+
+    <!-- DigitalOcean Key -->
+    <div class="sc">
+      <h3><span class="ico" style="background:rgba(0,105,255,.08);color:#0069ff;">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 108 8 8 8 0 00-8-8zm0 14.5a6.5 6.5 0 116.5-6.5h-3.25v3.25H8z"/></svg>
+      </span> DigitalOcean Token</h3>
+      <form method="post">
+        <input type="hidden" name="action" value="digitaloceankey">
+        <div class="key-row">
+          <label>API Token
+            {% if has_do_key %}<input type="text" name="digitalocean_key" placeholder="{{ do_masked_key }}" autocomplete="off">
+            {% else %}<input type="text" name="digitalocean_key" placeholder="dop_v1_..." required autocomplete="off">{% endif %}
+            {% if has_do_key %}<span class="key-val">{{ do_masked_key }}</span>{% endif %}
+          </label>
+          <button type="submit">Save</button>
+        </div>
+        {% if has_do_key %}<small>Leave blank to keep current token.</small>{% endif %}
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Install Claude Code -->
+<div style="max-width:820px;margin-top:10px;">
+  <div class="sc">
+    <h3><span class="ico" style="background:rgba(139,92,246,.08);color:var(--purple);">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M0 2.75C0 1.784.784 1 1.75 1h12.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0114.25 15H1.75A1.75 1.75 0 010 13.25zm1.75-.25a.25.25 0 00-.25.25v10.5c0 .138.112.25.25.25h12.5a.25.25 0 00.25-.25V2.75a.25.25 0 00-.25-.25z"/></svg>
+    </span> Install Claude Code</h3>
+    {% if servers %}
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+      <label style="flex:1;min-width:160px;margin:0;">Target Server
+        <select id="claudeServer" style="margin-top:4px;">
+          {% for s in servers %}<option value="{{ s.name }}">{{ s.name }} ({{ s.user }}@{{ s.host }})</option>{% endfor %}
+        </select>
+      </label>
+      <button type="button" id="installClaudeBtn" onclick="installClaudeCode()" style="
+        display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;
+        font-size:13px;font-weight:600;font-family:inherit;
+        border-radius:8px;border:none;cursor:pointer;
+        background:linear-gradient(135deg,#7c3aed,#6e40c9);color:#fff;
+        transition:opacity .15s;white-space:nowrap;flex-shrink:0;
+      "><span style="font-family:monospace;font-weight:700;">&gt;_</span> Install</button>
+    </div>
+    <div id="installTerminal" style="display:none;margin-top:12px;">
+      <div id="installOutput" style="
+        background:var(--bg);color:var(--text2);font-family:'JetBrains Mono','Fira Code',monospace;
+        font-size:11.5px;line-height:1.6;padding:12px;border-radius:8px;
+        border:1px solid var(--border);max-height:380px;overflow-y:auto;
+        white-space:pre-wrap;word-break:break-all;
+      "></div>
+    </div>
+    <div id="installBanner" style="display:none;margin-top:8px;font-size:13px;font-weight:500;"></div>
+    {% else %}
+    <p style="color:var(--muted);font-size:13px;">No servers configured. Add a server first.</p>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function ansiToHtml(t){var o='',i=0,open=false;while(i<t.length){if(t.charCodeAt(i)===27&&t[i+1]==='['){var j=i+2;while(j<t.length&&t[j]!=='m')j++;var c=t.substring(i+2,j);i=j+1;if(open){o+='</span>';open=false;}var s='';if(c==='0;31')s='color:#ef4444';else if(c==='0;32')s='color:#22c55e';else if(c==='1;33')s='color:#eab308;font-weight:bold';if(s){o+='<span style="'+s+'">';open=true;}}else{var ch=t[i];if(ch==='<')o+='&lt;';else if(ch==='>')o+='&gt;';else if(ch==='&')o+='&amp;';else o+=ch;i++;}}if(open)o+='</span>';return o;}
+function installClaudeCode(){var sel=document.getElementById('claudeServer');if(!sel)return;var nm=sel.value,lbl=sel.options[sel.selectedIndex].text;if(!confirm('Install Claude Code on '+lbl+'?'))return;var btn=document.getElementById('installClaudeBtn'),term=document.getElementById('installTerminal'),out=document.getElementById('installOutput'),ban=document.getElementById('installBanner');btn.disabled=true;btn.style.opacity='0.5';term.style.display='block';out.innerHTML='';ban.style.display='none';sel.disabled=true;fetch('/install_claude_code/'+encodeURIComponent(nm),{method:'POST'}).then(function(r){var rd=r.body.getReader(),dec=new TextDecoder(),buf='',done2=false;function read(){rd.read().then(function(res){if(res.done){if(!done2)finish(1);return;}buf+=dec.decode(res.value,{stream:true});var lines=buf.split('\n');buf=lines.pop();for(var i=0;i<lines.length;i++){var l=lines[i];if(l==='event: done'){done2=true;continue;}if(l.startsWith('data: ')){var p=l.substring(6);if(done2){finish(parseInt(p));return;}try{out.innerHTML+=ansiToHtml(JSON.parse(p))+'\n';out.scrollTop=out.scrollHeight;}catch(e){}}}read();}).catch(function(){if(!done2)finish(1);});}read();}).catch(function(e){out.innerHTML+='<span style="color:#ef4444">Error: '+e+'</span>\n';finish(1);});function finish(code){btn.disabled=false;btn.style.opacity='';sel.disabled=false;ban.style.display='block';if(code===0){ban.style.color='var(--green)';ban.textContent='Installed successfully!';}else{ban.style.color='var(--red)';ban.textContent='Installation failed (exit '+code+').';}}}
+async function switchModel(m){await fetch("/settings/model",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:m})});}
+</script>
+{% endblock %}

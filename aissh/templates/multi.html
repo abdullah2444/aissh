@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block title %}Multi Terminal -- AI SSH Helper{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10/lib/addon-fit.js"></script>
+<style>
+body { overflow: hidden; }
+.main-content {
+  flex: 1; min-height: 0; padding: 0; max-width: 100%; margin: 0;
+  width: 100%; display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* ── Top bar ── */
+.mt-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.mt-bar .back-btn {
+  color: var(--muted); background: none; border: none; padding: 4px 8px;
+  border-radius: 5px; font-size: 12px; cursor: pointer; text-decoration: none;
+  transition: all .12s; font-family: inherit;
+}
+.mt-bar .back-btn:hover { color: var(--text); background: var(--surface2); }
+.mt-bar h2 { font-size: 13px; font-weight: 600; margin: 0; flex-shrink: 0; }
+.mt-bar .fill { flex: 1; }
+
+/* Server picker chips */
+.srv-chips { display: flex; gap: 4px; flex-wrap: wrap; overflow-x: auto; scrollbar-width: none; }
+.srv-chips::-webkit-scrollbar { display: none; }
+.srv-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 5px; font-size: 11px; font-weight: 500;
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text2);
+  cursor: pointer; white-space: nowrap; transition: all .12s; flex-shrink: 0;
+}
+.srv-chip:hover { border-color: var(--border2); background: var(--surface3); }
+.srv-chip.on { background: var(--accent-btn); color: #fff; border-color: var(--accent-btn); }
+.srv-chip.on:hover { background: var(--accent-hover); }
+
+/* Layout buttons */
+.layout-btns { display: flex; gap: 2px; flex-shrink: 0; }
+.layout-btn {
+  all: unset; padding: 4px 8px; font-size: 11px; color: var(--muted);
+  border-radius: 4px; cursor: pointer; transition: all .1s;
+}
+.layout-btn:hover { color: var(--text); background: var(--surface2); }
+.layout-btn.on { color: var(--accent); background: var(--surface2); }
+
+/* ── Broadcast bar ── */
+.bc-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 12px; background: var(--bg);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.bc-bar label { font-size: 10px; font-weight: 600; color: var(--muted); margin: 0; flex-shrink: 0; text-transform: uppercase; letter-spacing: .06em; }
+.bc-bar input {
+  flex: 1; height: 26px; font-size: 12px; padding: 2px 8px;
+  font-family: 'JetBrains Mono','Fira Code',monospace;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 5px; color: var(--text); outline: none;
+}
+.bc-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(59,130,246,.1); }
+.bc-bar button {
+  all: unset; height: 26px; padding: 0 10px; font-size: 11px; font-weight: 600;
+  border-radius: 5px; cursor: pointer; background: var(--accent-btn);
+  color: #fff; transition: all .12s; flex-shrink: 0;
+  display: inline-flex; align-items: center; box-sizing: border-box;
+}
+.bc-bar button:hover { background: var(--accent-hover); }
+
+/* ── Terminal grid ── */
+.mt-grid {
+  flex: 1; min-height: 0; display: grid;
+  gap: 1px; background: var(--border);
+  overflow: hidden;
+  grid-auto-rows: 1fr;
+}
+.mt-grid.cols-1 { grid-template-columns: 1fr; }
+.mt-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.mt-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+.mt-grid.cols-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+
+.mt-pane {
+  display: flex; flex-direction: column;
+  background: var(--bg); overflow: hidden;
+  min-height: 0; min-width: 0;
+}
+.pane-hdr {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 8px; background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.pane-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--muted);
+  transition: all .3s;
+}
+.pane-dot.ok { background: var(--green); box-shadow: 0 0 5px rgba(34,197,94,.4); }
+.pane-dot.err { background: var(--red); }
+.pane-dot.wait { background: var(--yellow); animation: blink 1s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+.pane-name { font-size: 11px; font-weight: 600; color: var(--text2); }
+.pane-addr { font-size: 10px; color: var(--muted); font-family: monospace; }
+.pane-body { flex: 1; min-height: 80px; overflow: hidden; padding: 1px; }
+
+.mt-empty {
+  display: flex; align-items: center; justify-content: center;
+  grid-column: 1 / -1; grid-row: 1 / -1;
+  color: var(--muted); font-size: 13px; background: var(--bg);
+}
+
+@media (max-width: 640px) {
+  .mt-grid.cols-2, .mt-grid.cols-3, .mt-grid.cols-4 {
+    grid-template-columns: 1fr; grid-auto-rows: minmax(180px, 1fr);
+  }
+  .srv-chips { max-width: 50vw; }
+  .srv-chip { font-size: 10px; padding: 2px 7px; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Top bar -->
+<div class="mt-bar">
+  <a class="back-btn" href="{{ url_for('index') }}">&#8592;</a>
+  <h2>Multi Terminal</h2>
+  <div class="srv-chips" id="srv-chips">
+    {% for s in servers %}
+    <span class="srv-chip {% if s.name in selected %}on{% endif %}"
+          data-name="{{ s.name }}" data-host="{{ s.host }}" data-user="{{ s.user }}" data-port="{{ s.port }}"
+          onclick="toggleServer(this)">{{ s.name }}</span>
+    {% endfor %}
+  </div>
+  <span class="fill"></span>
+  <div class="layout-btns">
+    <button class="layout-btn" onclick="setLayout(1)" title="1 column">&#9635;</button>
+    <button class="layout-btn on" onclick="setLayout(2)" title="2 columns">&#9636;</button>
+    <button class="layout-btn" onclick="setLayout(4)" title="2x2 grid">&#9638;</button>
+  </div>
+</div>
+
+<!-- Broadcast bar -->
+<div class="bc-bar">
+  <label>Broadcast</label>
+  <input type="text" id="bc-input" placeholder="Type command and press Enter to send to all terminals..."
+         onkeydown="if(event.key==='Enter'){broadcast();event.preventDefault();}">
+  <button onclick="broadcast()">Send All</button>
+</div>
+
+<!-- Terminal grid -->
+<div class="mt-grid cols-2" id="mt-grid"></div>
+
+<script>
+var ALL_SERVERS = {{ servers | tojson }};
+var _panes = {}; // name -> {term, fit, sock, el}
+var _layout = 2;
+
+function getSelected() {
+  return Array.from(document.querySelectorAll('.srv-chip.on')).map(function(c) { return c.dataset.name; });
+}
+
+function toggleServer(chip) {
+  chip.classList.toggle('on');
+  rebuildPanes();
+}
+
+function setLayout(n) {
+  _layout = n;
+  var grid = document.getElementById('mt-grid');
+  grid.className = 'mt-grid cols-' + n;
+  document.querySelectorAll('.layout-btn').forEach(function(b, i) {
+    b.classList.toggle('on', [1,2,4][i] === n);
+  });
+  // Refit all terminals
+  Object.values(_panes).forEach(function(p) {
+    if (p.fit) setTimeout(function() { p.fit.fit(); resizePane(p); }, 50);
+  });
+}
+
+function resizePane(p) {
+  if (p.sock && p.sock.readyState === WebSocket.OPEN && p.term) {
+    p.sock.send('RESIZE:' + p.term.cols + ':' + p.term.rows);
+  }
+}
+
+function rebuildPanes() {
+  var sel = getSelected();
+  var grid = document.getElementById('mt-grid');
+
+  // Remove panes no longer selected
+  Object.keys(_panes).forEach(function(name) {
+    if (sel.indexOf(name) === -1) {
+      var p = _panes[name];
+      if (p.sock) try { p.sock.close(); } catch(_) {}
+      if (p.term) p.term.dispose();
+      delete _panes[name];
+    }
+  });
+
+  // Clear grid
+  grid.innerHTML = '';
+
+  if (!sel.length) {
+    grid.innerHTML = '<div class="mt-empty">Select servers above to open terminals</div>';
+    return;
+  }
+
+  sel.forEach(function(name) {
+    var srv = ALL_SERVERS.find(function(s) { return s.name === name; });
+    if (!srv) return;
+
+    // Create pane element
+    var pane = document.createElement('div');
+    pane.className = 'mt-pane';
+    pane.id = 'pane-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+
+    var hdr = document.createElement('div');
+    hdr.className = 'pane-hdr';
+    hdr.innerHTML = '<span class="pane-dot wait" id="dot-' + name.replace(/[^a-zA-Z0-9]/g, '_') + '"></span>'
+      + '<span class="pane-name">' + name + '</span>'
+      + '<span class="pane-addr">' + srv.user + '@' + srv.host + '</span>';
+    pane.appendChild(hdr);
+
+    var body = document.createElement('div');
+    body.className = 'pane-body';
+    pane.appendChild(body);
+    grid.appendChild(pane);
+
+    // If already have this pane, reattach
+    if (_panes[name]) {
+      var existing = _panes[name];
+      body.appendChild(existing.term.element.parentElement || existing.term.element);
+      existing.fit.fit();
+      resizePane(existing);
+      return;
+    }
+
+    // Create new terminal
+    var term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      fontSize: 12,
+      fontFamily: '"JetBrains Mono","Fira Code","SF Mono",monospace',
+      lineHeight: 1.15,
+      scrollback: 5000,
+      theme: {
+        background: '#0a0e14',
+        foreground: '#b8c4d4',
+        cursor: '#3b82f6',
+        cursorAccent: '#0a0e14',
+        selectionBackground: 'rgba(59,130,246,.2)',
+        black: '#1a2028', red: '#ef4444', green: '#22c55e', yellow: '#eab308',
+        blue: '#3b82f6', magenta: '#a78bfa', cyan: '#22d3ee', white: '#b8c4d4',
+        brightBlack: '#5e6e82', brightRed: '#fca5a5', brightGreen: '#4ade80',
+        brightYellow: '#fde047', brightBlue: '#60a5fa', brightMagenta: '#c4b5fd',
+        brightCyan: '#67e8f9', brightWhite: '#e2e8f0',
+      }
+    });
+
+    var fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(body);
+    setTimeout(function() { fit.fit(); }, 20);
+
+    var dotId = 'dot-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+    var dot = document.getElementById(dotId);
+
+    // WebSocket
+    var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    var sock = new WebSocket(proto + '://' + location.host + '/ws/terminal/' + encodeURIComponent(name));
+    sock.binaryType = 'arraybuffer';
+
+    sock.onopen = function() {
+      if (dot) dot.className = 'pane-dot ok';
+      sock.send('RESIZE:' + term.cols + ':' + term.rows);
+    };
+    sock.onmessage = function(e) {
+      try { term.write(typeof e.data === 'string' ? e.data : new TextDecoder().decode(e.data)); } catch(_) {}
+    };
+    sock.onclose = function() {
+      if (dot) dot.className = 'pane-dot err';
+      term.write('\r\n\x1b[2m--- disconnected ---\x1b[0m\r\n');
+    };
+    sock.onerror = function() { if (dot) dot.className = 'pane-dot err'; };
+
+    term.onData(function(d) { try { sock.send(d); } catch(_) {} });
+
+    // Copy on select
+    term.onSelectionChange(function() {
+      var s = term.getSelection();
+      if (s) navigator.clipboard.writeText(s).catch(function(){});
+    });
+
+    _panes[name] = { term: term, fit: fit, sock: sock, el: pane };
+
+    // Resize observer
+    new ResizeObserver(function() {
+      fit.fit();
+      resizePane(_panes[name]);
+    }).observe(body);
+  });
+}
+
+function broadcast() {
+  var cmd = document.getElementById('bc-input').value;
+  if (!cmd) return;
+  Object.values(_panes).forEach(function(p) {
+    if (p.sock && p.sock.readyState === WebSocket.OPEN) {
+      p.sock.send(cmd + '\r');
+    }
+  });
+  document.getElementById('bc-input').value = '';
+  document.getElementById('bc-input').focus();
+}
+
+// Initial build
+rebuildPanes();
+</script>
+{% endblock %}

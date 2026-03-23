@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ server.name }} -- AI SSH Helper{% endblock %}
+{% block head %}
+<style>
+  .edit-wrap { max-width: 500px; }
+  .breadcrumb {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--muted); margin-bottom: 16px;
+  }
+  .breadcrumb a { color: var(--muted); text-decoration: none; transition: color .12s; }
+  .breadcrumb a:hover { color: var(--accent); }
+  .breadcrumb .sep { color: var(--surface3); }
+
+  .edit-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  }
+  .edit-card h2 { margin: 0 0 18px; font-size: 1.05rem; font-weight: 700; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  @media (max-width: 480px) { .form-grid { grid-template-columns: 1fr; } }
+  .form-grid label { margin: 0; }
+  .form-grid .full { grid-column: 1 / -1; }
+  .hint {
+    font-size: 11px; color: var(--muted); margin: 10px 0;
+    padding: 6px 10px; background: var(--surface2); border-radius: 6px;
+    border-left: 2px solid var(--border2);
+  }
+  .form-actions { display: flex; gap: 8px; margin-top: 16px; }
+
+  .auth-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 12px; }
+  .auth-row span { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .seg-ctl { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .seg-btn {
+    all: unset; box-sizing: border-box;
+    display: inline-flex; align-items: center;
+    height: 26px; padding: 0 12px; font-size: 11.5px; font-weight: 500;
+    background: var(--surface2); color: var(--muted); cursor: pointer;
+    border-right: 1px solid var(--border);
+    transition: background .12s, color .12s;
+  }
+  .seg-btn:last-child { border-right: none; }
+  .seg-btn.on { background: var(--accent-btn); color: #fff; }
+  .seg-btn:not(.on):hover { background: var(--surface3); color: var(--text); }
+
+  .pem-note {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--green);
+    background: rgba(34,197,94,.06); border: 1px solid rgba(34,197,94,.15);
+    border-radius: 6px; padding: 4px 10px; margin-bottom: 8px;
+    max-width: 100%;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set has_pem = server.get('pem_key', '') | length > 0 %}
+
+<div class="edit-wrap">
+  <div class="breadcrumb">
+    <a href="{{ url_for('index') }}">Servers</a>
+    <span class="sep">&#8250;</span>
+    <span>Edit {{ server.name }}</span>
+  </div>
+  <div class="edit-card">
+    <h2>Edit Server</h2>
+    {% if error %}<p class="flash-error">{{ error }}</p>{% endif %}
+    <form method="post" enctype="multipart/form-data">
+      <div class="form-grid">
+        <label class="full">Name <input type="text" name="name" value="{{ server.name }}" required></label>
+        <label class="full">Host / IP <input type="text" name="host" value="{{ server.host }}" required></label>
+        <label>Port <input type="number" name="port" value="{{ server.port }}" min="1" max="65535"></label>
+        <label>User <input type="text" name="user" value="{{ server.user }}" required></label>
+      </div>
+      <div class="auth-row">
+        <span>Auth</span>
+        <div class="seg-ctl">
+          <button type="button" id="edit-auth-pw" class="seg-btn {{ '' if has_pem else 'on' }}" onclick="setAuth('password')">Password</button>
+          <button type="button" id="edit-auth-pem" class="seg-btn {{ 'on' if has_pem else '' }}" onclick="setAuth('pem')">PEM Key</button>
+        </div>
+      </div>
+      <input type="hidden" name="auth_type" id="auth_type_hidden" value="{{ 'pem' if has_pem else 'password' }}">
+      <div id="edit-pw-section" {% if has_pem %}style="display:none"{% endif %}>
+        <label>Password <small>(blank = keep current)</small> <input type="password" name="password" placeholder="(unchanged)"></label>
+      </div>
+      <div id="edit-pem-section" {% if not has_pem %}style="display:none"{% endif %}>
+        {% if has_pem %}<div class="pem-note">PEM key configured</div>{% endif %}
+        <label>{{ "Replace" if has_pem else "Upload" }} Private Key <input type="file" name="pem_file" accept=".pem,.key,">
+          {% if has_pem %}<small>Leave blank to keep existing key.</small>{% endif %}
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit">Save Changes</button>
+        <a href="{{ url_for('index') }}" role="button" class="secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function setAuth(t){
+  document.getElementById("auth_type_hidden").value=t;
+  document.getElementById("edit-pw-section").style.display=t==="password"?"":"none";
+  document.getElementById("edit-pem-section").style.display=t==="pem"?"":"none";
+  document.getElementById("edit-auth-pw").className="seg-btn"+(t==="password"?" on":"");
+  document.getElementById("edit-auth-pem").className="seg-btn"+(t==="pem"?" on":"");
+}
+</script>
+{% endblock %}

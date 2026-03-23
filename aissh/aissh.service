@@ -1,0 +1,30 @@
+[Unit]
+Description=AISSH - AI SSH Server Manager
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=root
+Group=root
+WorkingDirectory=/root/aissh
+Environment="PATH=/root/aissh/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/root/aissh/venv/bin/gunicorn -c gunicorn.conf.py app:app
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=30
+
+# Hardening
+PrivateTmp=true
+NoNewPrivileges=false
+ProtectSystem=false
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aissh
+
+[Install]
+WantedBy=multi-user.target

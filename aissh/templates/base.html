@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AI SSH Helper{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:         #0a0e14;
+      --surface:    #131920;
+      --surface2:   #1a2028;
+      --surface3:   #242c38;
+      --border:     #1e2530;
+      --border2:    #2e3a4a;
+      --text:       #e2e8f0;
+      --text2:      #b8c4d4;
+      --muted:      #5e6e82;
+      --accent:     #3b82f6;
+      --accent2:    #60a5fa;
+      --accent-btn: #2563eb;
+      --accent-hover:#3b82f6;
+      --green:      #22c55e;
+      --red:        #ef4444;
+      --yellow:     #eab308;
+      --purple:     #8b5cf6;
+      --nav-h:      48px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; min-width: 300px; }
+    body {
+      display: flex; flex-direction: column; min-height: 100%;
+      background: var(--bg); color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-size: 13.5px; line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border2); }
+
+    /* ── Nav ── */
+    nav.top-nav {
+      height: var(--nav-h); padding: 0 1.25rem;
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(19,25,32,.85);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(30,37,48,.6);
+      flex-shrink: 0; position: sticky; top: 0; z-index: 50;
+    }
+    .brand {
+      color: var(--text); font-weight: 700; font-size: .88rem;
+      text-decoration: none; display: flex; align-items: center; gap: .5rem;
+      letter-spacing: -.02em;
+    }
+    .brand-mark {
+      width: 26px; height: 26px;
+      background: linear-gradient(135deg, var(--accent-btn), var(--purple));
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 800; color: #fff;
+      letter-spacing: -.03em; flex-shrink: 0;
+    }
+    .nav-right { display: flex; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+    .nav-right::-webkit-scrollbar { display: none; }
+    .nav-link {
+      color: var(--muted); text-decoration: none;
+      padding: 5px 10px; border-radius: 6px;
+      font-size: 12px; font-weight: 500;
+      transition: color .15s, background .15s;
+    }
+    .nav-link:hover { color: var(--text); background: var(--surface2); }
+    .nav-sep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
+    .nav-user { font-size: 11px; color: var(--muted); padding: 4px 6px; }
+
+    /* ── Main ── */
+    .main-content {
+      flex: 1; padding: 2rem 1.5rem;
+      max-width: 1060px; width: 100%; margin: 0 auto;
+    }
+    .flash-success { color: var(--green); margin-bottom: 1rem; font-size: .82rem; font-weight: 500; word-break: break-word; }
+    .flash-error   { color: var(--red);   margin-bottom: 1rem; font-size: .82rem; font-weight: 500; word-break: break-word; }
+
+    /* ── Controls ── */
+    .ctl {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 32px; padding: 0 12px;
+      font-size: 12px; font-weight: 500; font-family: inherit;
+      border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--text2);
+      cursor: pointer; white-space: nowrap; margin: 0; line-height: 1;
+      text-decoration: none; width: auto;
+      transition: all .15s ease;
+      -webkit-appearance: none; appearance: none; user-select: none;
+    }
+    .ctl:hover { background: var(--surface3); border-color: var(--border2); color: var(--text); }
+    .ctl:active { transform: scale(.97); }
+    .ctl.active { background: var(--accent-btn); color: #fff; border-color: var(--accent-btn); }
+    .ctl.active:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    .ctl.danger { color: var(--red); }
+    .ctl.danger:hover { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.4); }
+    select.ctl {
+      padding-right: 28px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%235e6e82' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 8px center;
+    }
+    .ctl:disabled { opacity: .35; cursor: not-allowed; }
+
+    /* ── Forms ── */
+    input, textarea, select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      padding: 8px 12px;
+      outline: none;
+      width: 100%;
+      transition: border-color .15s, box-shadow .15s;
+      -webkit-appearance: none;
+    }
+    input::placeholder, textarea::placeholder { color: var(--muted); opacity: .7; }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59,130,246,.1);
+    }
+    input[type="checkbox"] {
+      width: 15px; height: 15px; padding: 0;
+      cursor: pointer; accent-color: var(--accent-btn);
+      vertical-align: middle;
+    }
+    input[type="file"] { height: auto; padding: 6px 8px; }
+    label {
+      display: block;
+      font-size: 12px; font-weight: 500; color: var(--muted);
+      margin-bottom: 4px;
+    }
+    label > input, label > textarea, label > select { margin-top: 4px; }
+    small { font-size: 11px; color: var(--muted); }
+    button[type="submit"] {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 32px; padding: 0 16px;
+      font-size: 13px; font-weight: 600; font-family: inherit;
+      border-radius: 8px; border: none; cursor: pointer;
+      background: var(--accent-btn); color: #fff;
+      transition: all .15s ease; white-space: nowrap;
+    }
+    button[type="submit"]:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,99,235,.25); }
+    button[type="submit"]:active { transform: translateY(0); }
+    a[role="button"].secondary, button.secondary {
+      display: inline-flex; align-items: center; justify-content: center;
+      height: 32px; padding: 0 16px;
+      font-size: 13px; font-weight: 500; font-family: inherit;
+      border-radius: 8px; border: 1px solid var(--border); cursor: pointer;
+      background: var(--surface2); color: var(--text2); text-decoration: none;
+      transition: all .15s ease;
+    }
+    button.secondary:hover, a[role="button"].secondary:hover {
+      background: var(--surface3); border-color: var(--border2);
+    }
+
+    /* ── Dialog ── */
+    dialog::backdrop { background: rgba(0,0,0,.7); backdrop-filter: blur(4px); }
+    dialog {
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 12px;
+      color: var(--text);
+      padding: 0;
+      max-width: min(520px, 95vw);
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 16px 48px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.03);
+    }
+    dialog[open] { animation: dlg-in .2s ease-out; }
+    @keyframes dlg-in {
+      from { opacity: 0; transform: scale(.96) translateY(-8px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    /* ── Mobile ── */
+    @media (max-width: 480px) {
+      nav.top-nav { padding: 0 10px; }
+      .nav-user { display: none; }
+      .nav-link { padding: 4px 6px; font-size: 11px; }
+      .nav-sep { margin: 0 2px; }
+      .main-content { padding: 16px 12px; }
+      input:not([type="checkbox"]):not([type="radio"]),
+      textarea, select { font-size: 16px; }
+    }
+    @media (max-width: 400px) {
+      .brand-text { display: none; }
+    }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+{% if current_user.is_authenticated %}
+<nav class="top-nav">
+  <a href="{{ url_for('index') }}" class="brand">
+    <span class="brand-mark">SSH</span>
+    <span class="brand-text">AI SSH Helper</span>
+  </a>
+  <div class="nav-right">
+    <a href="{{ url_for('index') }}" class="nav-link">Servers</a>
+    <a href="{{ url_for('droplets_page') }}" class="nav-link">Droplets</a>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('admin_users') }}" class="nav-link">Admin</a>
+    {% endif %}
+    <a href="{{ url_for('settings') }}" class="nav-link">Settings</a>
+    <div class="nav-sep"></div>
+    <span class="nav-user">{{ current_user.username }}</span>
+    <a href="{{ url_for('logout') }}" class="nav-link">Logout</a>
+  </div>
+</nav>
+{% endif %}
+
+<div class="main-content">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <p class="flash-{{ category }}">{{ message }}</p>
+    {% endfor %}
+  {% endwith %}
+  {% if error_code %}
+  <div style="text-align:center;padding:5rem 1rem;">
+    <div style="font-size:4rem;font-weight:800;color:var(--muted);opacity:.2;line-height:1;">{{ error_code }}</div>
+    <p style="font-size:.95rem;color:var(--muted);margin:.75rem 0 1.75rem;">{{ error_msg }}</p>
+    <a href="{{ url_for('index') }}" class="ctl active" style="display:inline-flex;">Back to Servers</a>
+  </div>
+  {% else %}
+  {% block content %}{% endblock %}
+  {% endif %}
+</div>
+
+</body>
+</html>

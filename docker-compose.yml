@@ -1,0 +1,18 @@
+services:
+  aissh:
+    build: .
+    container_name: aissh
+    restart: unless-stopped
+    ports:
+      - "5002:5002"
+    volumes:
+      # Persist user data, server configs, bookmarks across restarts
+      - aissh_data:/app/aissh/data
+      - aissh_logs:/var/log/aissh
+    environment:
+      # Set a unique secret key. Generate one: python3 -c "import secrets; print(secrets.token_hex(24))"
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:?Set FLASK_SECRET_KEY in .env or environment}
+
+volumes:
+  aissh_data:
+  aissh_logs:

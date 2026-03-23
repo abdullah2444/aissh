@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Login -- AI SSH Helper{% endblock %}
+{% block head %}
+<style>
+  body { align-items: center; justify-content: center; }
+  .main-content {
+    max-width: 100%; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .login-wrap { width: 100%; max-width: 380px; padding: 1.25rem; }
+  .login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2.5rem 2rem 2rem;
+    box-shadow: 0 8px 40px rgba(0,0,0,.4), 0 0 80px rgba(59,130,246,.04);
+  }
+  .login-logo {
+    display: flex; align-items: center; justify-content: center;
+    gap: .6rem; margin-bottom: 2rem;
+  }
+  .login-logo .mark {
+    width: 36px; height: 36px; font-size: 12px;
+    background: linear-gradient(135deg, var(--accent-btn), var(--purple));
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; color: #fff; letter-spacing: -.03em;
+  }
+  .login-logo .name {
+    font-size: 1.05rem; font-weight: 700; color: var(--text);
+    letter-spacing: -.02em;
+  }
+  .login-card .field { margin-bottom: 1rem; }
+  .login-card label {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px;
+  }
+  .login-card input { height: 40px; font-size: 14px; border-radius: 8px; }
+  .login-card button[type="submit"] {
+    width: 100%; height: 40px; margin-top: 6px; font-size: 14px;
+    border-radius: 8px;
+  }
+  .login-error {
+    background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.2);
+    border-radius: 8px; padding: 10px 14px;
+    color: var(--red); font-size: 12.5px; margin-bottom: 1rem;
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">
+      <span class="mark">SSH</span>
+      <span class="name">AI SSH Helper</span>
+    </div>
+    {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+    <form method="post">
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" type="text" name="username" autofocus required
+               autocomplete="username" placeholder="Enter username">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" type="password" name="password" required
+               autocomplete="current-password" placeholder="Enter password">
+      </div>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

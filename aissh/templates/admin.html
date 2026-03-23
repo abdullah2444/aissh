@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Admin -- AI SSH Helper{% endblock %}
+{% block head %}
+<style>
+  .adm-hdr { margin-bottom: 1.5rem; }
+  .adm-hdr h2 { font-size: 1.1rem; font-weight: 700; margin: 0 0 4px; }
+  .adm-hdr p { color: var(--muted); font-size: 12.5px; margin: 0; }
+
+  .ac {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 10px;
+    max-width: 820px;
+  }
+  .ac h3 {
+    margin: 0 0 14px; font-size: 12px; font-weight: 700;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+    padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+
+  .add-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .add-row label { flex: 1; min-width: 120px; margin: 0; font-size: 12px; }
+  .add-row label input { height: 34px; }
+  .admin-chk {
+    display: flex; align-items: center; gap: 5px; height: 32px;
+    font-size: 12px; color: var(--muted); white-space: nowrap;
+  }
+  .add-row button[type="submit"] { flex-shrink: 0; }
+  .add-row label input { height: 32px; }
+
+  .u-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .u-table th {
+    text-align: left; padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em;
+  }
+  .u-table td {
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    vertical-align: middle; color: var(--text2);
+  }
+  .u-table tr:last-child td { border-bottom: none; }
+  .u-table tr:hover td { background: var(--surface2); }
+
+  .role-badge {
+    display: inline-flex; align-items: center; padding: 2px 8px;
+    border-radius: 4px; font-size: 10px; font-weight: 700;
+  }
+  .role-admin { background: rgba(59,130,246,.08); color: var(--accent); border: 1px solid rgba(59,130,246,.15); }
+  .role-user  { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .you-tag { font-size: 10px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+  .rst-form { display: flex; gap: 6px; align-items: center; }
+  .rst-form input[type="password"] {
+    width: 120px; height: 26px; padding: 0 8px;
+    font-size: 12px; border-radius: 6px; flex-shrink: 0;
+  }
+  .rst-btn, .del-btn {
+    all: unset; box-sizing: border-box;
+    display: inline-flex; align-items: center;
+    height: 26px; padding: 0 10px; font-size: 11px; font-weight: 600;
+    font-family: inherit; border-radius: 5px; cursor: pointer;
+    border: 1px solid var(--border); white-space: nowrap;
+    transition: all .12s ease;
+  }
+  .rst-btn { background: var(--surface2); color: var(--text2); }
+  .rst-btn:hover { background: var(--surface3); border-color: var(--border2); }
+  .del-btn { color: var(--red); background: transparent; }
+  .del-btn:hover { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.3); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="adm-hdr">
+  <h2>User Management</h2>
+  <p>Create, delete, and manage user accounts.</p>
+</div>
+
+<div class="ac">
+  <h3>Add User</h3>
+  <form method="post" action="{{ url_for('admin_users_add') }}">
+    <div class="add-row">
+      <label>Username <input type="text" name="username" required autocomplete="off" placeholder="username"></label>
+      <label>Password <small>(min 8)</small> <input type="password" name="password" required minlength="8" autocomplete="new-password" placeholder="password"></label>
+      <label class="admin-chk" style="flex:0;"><input type="checkbox" name="is_admin" value="1"> Admin</label>
+      <button type="submit">Add User</button>
+    </div>
+  </form>
+</div>
+
+<div class="ac">
+  <h3>Users -- {{ users | length }}</h3>
+  <table class="u-table">
+    <thead><tr><th>Username</th><th>Role</th><th>Reset Password</th><th></th></tr></thead>
+    <tbody>
+      {% for user in users %}
+      <tr>
+        <td>{{ user.username }}{% if user.id == current_uid %}<span class="you-tag">(you)</span>{% endif %}</td>
+        <td>{% if user.is_admin %}<span class="role-badge role-admin">Admin</span>{% else %}<span class="role-badge role-user">User</span>{% endif %}</td>
+        <td>
+          <form class="rst-form" method="post" action="{{ url_for('admin_users_reset_password', uid=user.id) }}">
+            <input type="password" name="password" placeholder="new password" minlength="8" required autocomplete="new-password">
+            <button type="submit" class="rst-btn">Reset</button>
+          </form>
+        </td>
+        <td>
+          {% if user.id != current_uid %}
+          <form method="post" action="{{ url_for('admin_users_delete', uid=user.id) }}"
+                onsubmit="return confirm('Delete user ' + {{ user.username | tojson }} + '?\nThis will permanently delete all their data.')">
+            <button type="submit" class="del-btn">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

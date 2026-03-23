@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Droplets -- AI SSH Helper{% endblock %}
+{% block head %}
+<style>
+  .drop-hdr { margin-bottom: 1.5rem; }
+  .drop-hdr h2 { font-size: 1.1rem; font-weight: 700; margin: 0 0 4px; }
+  .drop-hdr p { color: var(--muted); font-size: 12.5px; margin: 0; }
+
+  .crc {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 14px;
+  }
+  .crc h3 {
+    margin: 0 0 14px; font-size: 12px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .crc-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+  }
+  .crc-grid .sp2 { grid-column: span 2; }
+  .crc-grid .sp3 { grid-column: span 3; }
+  @media (max-width: 640px) {
+    .crc-grid { grid-template-columns: 1fr; }
+    .crc-grid .sp2, .crc-grid .sp3 { grid-column: span 1; }
+  }
+
+  .dt {
+    width: 100%; border-collapse: collapse;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .dt th {
+    text-align: left; font-size: 10px; font-weight: 700;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .05em;
+    padding: 10px 14px; background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+  .dt td {
+    padding: 10px 14px; font-size: 13px;
+    border-bottom: 1px solid var(--border); vertical-align: middle;
+  }
+  .dt tr:last-child td { border-bottom: none; }
+  .dt tr:hover td { background: rgba(59,130,246,.02); }
+
+  .st-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    margin-right: 5px; vertical-align: middle;
+  }
+  .st-active  { background: var(--green); box-shadow: 0 0 5px rgba(34,197,94,.4); }
+  .st-new     { background: var(--yellow); box-shadow: 0 0 5px rgba(234,179,8,.4); }
+  .st-off     { background: var(--red); }
+  .st-other   { background: var(--muted); }
+
+  .ip-mono { font-family: 'JetBrains Mono','Fira Code',monospace; font-size: 12px; color: var(--accent); }
+
+  .d-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+  .d-actions form { margin: 0; }
+
+  .btn-sm {
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 26px; padding: 0 10px; font-size: 11px; font-weight: 500;
+    font-family: inherit; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text2); cursor: pointer;
+    white-space: nowrap; transition: all .12s;
+  }
+  .btn-sm:hover { background: var(--surface3); border-color: var(--border2); }
+  .btn-sm.danger { color: var(--red); }
+  .btn-sm.danger:hover { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.3); }
+  .btn-sm.accent { background: var(--accent-btn); color: #fff; border-color: var(--accent-btn); }
+  .btn-sm.accent:hover { background: var(--accent-hover); }
+
+  .empty-msg { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 13px; }
+  .vpc-select { display: none; }
+  .vpc-select.show { display: block; }
+
+  dialog .dlg-body { padding: 18px 20px; }
+  dialog .dlg-body h3 { margin: 0 0 10px; font-size: 14px; font-weight: 700; }
+  dialog .dlg-body p { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+  dialog .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
+  @media (max-width: 640px) {
+    .dt th:nth-child(3), .dt td:nth-child(3),
+    .dt th:nth-child(5), .dt td:nth-child(5) { display: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="drop-hdr">
+  <h2>DigitalOcean Droplets</h2>
+  <p>Create, manage and connect to your cloud servers.</p>
+</div>
+
+{% if not has_token %}
+<div class="crc" style="text-align:center;padding:2.5rem;">
+  <p style="color:var(--muted);margin:0 0 10px;">No DigitalOcean API token configured.</p>
+  <a href="{{ url_for('settings') }}" role="button" class="secondary">Go to Settings</a>
+</div>
+{% else %}
+
+{% if error %}<p class="flash-error">{{ error }}</p>{% endif %}
+
+<div class="crc">
+  <h3><span style="color:var(--green);">+</span> Create Droplet</h3>
+  <form method="post" action="{{ url_for('droplets_create') }}">
+    <div class="crc-grid">
+      <label>Name <input type="text" name="name" placeholder="my-server-01" required></label>
+      <label>Region
+        <select name="region" id="regionSelect" required>
+          <option value="">Select region...</option>
+          {% for r in regions %}<option value="{{ r.slug }}" data-slugs="{{ r.sizes | join(',') }}">{{ r.name }} ({{ r.slug }})</option>{% endfor %}
+        </select>
+      </label>
+      <label>Size
+        <select name="size" id="sizeSelect" required>
+          <option value="">Select size...</option>
+          {% for s in sizes %}<option value="{{ s.slug }}" data-regions="{{ s.regions | join(',') }}">{{ s.slug }} -- ${{ '%.0f' % s.price_monthly }}/mo ({{ s.vcpus }}vCPU, {{ s.memory }}MB)</option>{% endfor %}
+        </select>
+      </label>
+      <label>Image
+        <select name="image" required>
+          <option value="">Select image...</option>
+          {% for i in images %}<option value="{{ i.slug or i.id }}">{{ i.distribution }} {{ i.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Root Password <small>(optional)</small>
+        <input type="text" name="root_password" placeholder="Set root password..." autocomplete="off">
+      </label>
+      <label class="vpc-select" id="vpcLabel">VPC <small>(optional)</small>
+        <select name="vpc_uuid" id="vpcSelect">
+          <option value="">Default VPC</option>
+          {% for v in vpcs %}<option value="{{ v.id }}" data-region="{{ v.region }}">{{ v.name }} ({{ v.region }})</option>{% endfor %}
+        </select>
+      </label>
+      <div class="sp3" style="margin-top:4px;">
+        <button type="submit">Create Droplet</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+{% if droplets %}
+<table class="dt">
+  <thead><tr><th>Name</th><th>IP Address</th><th>Region</th><th>Status</th><th>Specs</th><th>Actions</th></tr></thead>
+  <tbody>
+    {% for d in droplets %}
+    {% set ns = namespace(ip='') %}
+    {% for net in d.networks.v4 %}{% if net.type == 'public' %}{% set ns.ip = net.ip_address %}{% endif %}{% endfor %}
+    <tr>
+      <td style="font-weight:600;">{{ d.name }}</td>
+      <td>{% if ns.ip %}<span class="ip-mono">{{ ns.ip }}</span>{% else %}<span style="color:var(--muted);">pending...</span>{% endif %}</td>
+      <td>{{ d.region.slug }}</td>
+      <td>
+        <span class="st-dot {% if d.status == 'active' %}st-active{% elif d.status == 'new' %}st-new{% elif d.status == 'off' %}st-off{% else %}st-other{% endif %}"></span>
+        {{ d.status }}
+      </td>
+      <td style="font-size:12px;color:var(--muted);">{{ d.vcpus }}vCPU / {{ d.memory }}MB / {{ d.disk }}GB</td>
+      <td>
+        <div class="d-actions">
+          {% if ns.ip and ns.ip not in existing_servers %}
+          <button type="button" class="btn-sm accent" onclick="showAddServer({{ d.id }}, {{ d.name | tojson }}, '{{ ns.ip }}')">Add to Servers</button>
+          {% elif ns.ip and ns.ip in existing_servers %}
+          <span class="btn-sm" style="opacity:.5;cursor:default;">Added</span>
+          {% endif %}
+          <form method="post" action="{{ url_for('droplets_reboot', droplet_id=d.id) }}">
+            <button type="submit" class="btn-sm" onclick="return confirm('Reboot ' + {{ d.name | tojson }} + '?')">Reboot</button>
+          </form>
+          <form method="post" action="{{ url_for('droplets_delete', droplet_id=d.id) }}">
+            <button type="submit" class="btn-sm danger" onclick="return confirm('DESTROY ' + {{ d.name | tojson }} + '? This cannot be undone!')">Destroy</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="crc"><p class="empty-msg">No droplets found. Create one above.</p></div>
+{% endif %}
+
+{% endif %}
+
+<dialog id="addServerDlg">
+  <div class="dlg-body">
+    <h3>Add Droplet to Servers</h3>
+    <p id="addServerInfo"></p>
+    <form method="post" id="addServerForm">
+      <label>Root Password <input type="password" name="password" placeholder="Enter root password" autocomplete="off"></label>
+      <small>The password you set when creating the droplet.</small>
+      <div class="dlg-actions">
+        <button type="button" class="secondary" onclick="document.getElementById('addServerDlg').close()">Cancel</button>
+        <button type="submit">Add Server</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<script>
+(function(){
+  var rSel=document.getElementById('regionSelect'),sSel=document.getElementById('sizeSelect'),vSel=document.getElementById('vpcSelect'),vLbl=document.getElementById('vpcLabel');
+  var allS=Array.from(sSel.options).slice(1),allV=vSel?Array.from(vSel.options).slice(1):[];
+  if(rSel)rSel.addEventListener('change',function(){var r=this.value;sSel.innerHTML='<option value="">Select size...</option>';allS.forEach(function(o){var rg=(o.getAttribute('data-regions')||'').split(',');if(!r||rg.indexOf(r)!==-1)sSel.appendChild(o.cloneNode(true));});if(vSel){vSel.innerHTML='<option value="">Default VPC</option>';var has=false;allV.forEach(function(o){if(o.getAttribute('data-region')===r){vSel.appendChild(o.cloneNode(true));has=true;}});vLbl.classList.toggle('show',has);}});
+})();
+function showAddServer(id,name,ip){document.getElementById('addServerInfo').textContent=name+' ('+ip+')';document.getElementById('addServerForm').action='/droplets/'+id+'/add-server';document.getElementById('addServerDlg').showModal();}
+</script>
+{% endblock %}
